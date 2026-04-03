@@ -1,0 +1,601 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useWallet } from '../hooks/useWallet';
+import { getProvider, getVoiceVaultContract } from '../utils/contracts';
+import { verifyVoice, forensicAnalysis } from '../utils/api';
+import AudioRecorder from '../components/AudioRecorder';
+
+function Spinner({ className = 'h-6 w-6' }) {
+  return (
+    <svg className={`animate-spin ${className} text-blue-500`} viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
+  );
+}
+
+function TabButton({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-6 py-3 font-medium transition-colors ${
+        active
+          ? 'text-white border-b-2 border-blue-500'
+          : 'text-gray-400 hover:text-gray-200'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SubTabButton({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+        active
+          ? 'bg-gray-700 text-white'
+          : 'bg-gray-800 text-gray-400 hover:text-gray-200'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ResultCard({ score, isDeepfake }) {
+  let color, icon, title, subtitle;
+
+  if (score >= 90 && !isDeepfake) {
+    color = '#10B981';
+    title = 'AUTHENTIC';
+    subtitle = 'Identity verified.';
+    icon = (
+      <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+      </svg>
+    );
+  } else if (score >= 75 && !isDeepfake) {
+    color = '#FBBF24';
+    title = 'SUSPICIOUS';
+    subtitle = 'Step-up auth recommended.';
+    icon = (
+      <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    );
+  } else if (score >= 60 && !isDeepfake) {
+    color = '#F97316';
+    title = 'UNCERTAIN';
+    subtitle = 'Could not confirm identity.';
+    icon = (
+      <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    );
+  } else {
+    color = '#EF4444';
+    title = 'DEEPFAKE DETECTED';
+    subtitle = 'This audio is not authentic.';
+    icon = (
+      <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    );
+  }
+
+  return (
+    <div 
+      className="text-center p-8 rounded-xl border-2 animate-fadeIn"
+      style={{ borderColor: color, backgroundColor: `${color}15` }}
+    >
+      <div className="flex justify-center mb-4">{icon}</div>
+      <h3 className="text-2xl font-bold mb-1" style={{ color }}>{title}</h3>
+      <p className="text-4xl font-bold text-white mb-2">{Math.round(score)}%</p>
+      <p className="text-gray-300">{subtitle}</p>
+    </div>
+  );
+}
+
+function ResultTable({ result }) {
+  const getAssessment = (score) => {
+    if (score >= 90) return { text: 'HIGH', color: 'text-green-400' };
+    if (score >= 75) return { text: 'MED', color: 'text-yellow-400' };
+    if (score >= 60) return { text: 'LOW', color: 'text-orange-400' };
+    return { text: 'REJ', color: 'text-red-400' };
+  };
+
+  const overall = getAssessment(result.score);
+  const livenessAssessment = result.liveness_score >= 70 ? 'Natural' : 'Synthetic';
+  const spectralAssessment = result.artifact_score <= 30 ? 'Clean' : 'Artifacts';
+
+  return (
+    <div className="mt-6 bg-gray-800 rounded-lg overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-700">
+            <th className="text-left px-4 py-3 text-gray-300">Metric</th>
+            <th className="text-left px-4 py-3 text-gray-300">Result</th>
+            <th className="text-left px-4 py-3 text-gray-300">Assessment</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-700">
+          <tr>
+            <td className="px-4 py-3 text-gray-400">Fuzzy Match</td>
+            <td className="px-4 py-3 text-white">{result.score >= 75 ? 'Pass' : 'Fail'}</td>
+            <td className={`px-4 py-3 ${result.score >= 75 ? 'text-green-400' : 'text-red-400'}`}>
+              {result.score >= 75 ? 'Matched' : 'No Match'}
+            </td>
+          </tr>
+          <tr>
+            <td className="px-4 py-3 text-gray-400">Liveness Score</td>
+            <td className="px-4 py-3 text-white">{Math.round(result.liveness_score || 0)}%</td>
+            <td className={`px-4 py-3 ${result.liveness_score >= 70 ? 'text-green-400' : 'text-red-400'}`}>
+              {livenessAssessment}
+            </td>
+          </tr>
+          <tr>
+            <td className="px-4 py-3 text-gray-400">Spectral Check</td>
+            <td className="px-4 py-3 text-white">{Math.round(100 - (result.artifact_score || 0))}%</td>
+            <td className={`px-4 py-3 ${result.artifact_score <= 30 ? 'text-green-400' : 'text-orange-400'}`}>
+              {spectralAssessment}
+            </td>
+          </tr>
+          <tr className="bg-gray-750">
+            <td className="px-4 py-3 text-gray-300 font-medium">Overall</td>
+            <td className="px-4 py-3 text-white font-bold">{Math.round(result.score)}%</td>
+            <td className={`px-4 py-3 font-bold ${overall.color}`}>{overall.text}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ForensicReport({ report }) {
+  const downloadReport = () => {
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `forensic-report-${report.report_id || Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-6 animate-fadeIn">
+      <div className="bg-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white mb-4">Report Details</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <span className="text-gray-400">Report ID:</span>
+            <p className="text-white font-mono">{report.report_id || 'N/A'}</p>
+          </div>
+          <div>
+            <span className="text-gray-400">Timestamp:</span>
+            <p className="text-white">{report.timestamp || new Date().toISOString()}</p>
+          </div>
+          <div>
+            <span className="text-gray-400">Similarity Score:</span>
+            <p className="text-white font-bold">{Math.round(report.similarity_score || report.score || 0)}%</p>
+          </div>
+          <div>
+            <span className="text-gray-400">Fuzzy Match:</span>
+            <p className={report.fuzzy_match ? 'text-green-400' : 'text-red-400'}>
+              {report.fuzzy_match ? 'Matched' : 'No Match'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white mb-4">Liveness Analysis</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-700">
+              <th className="text-left py-2 text-gray-400">Parameter</th>
+              <th className="text-left py-2 text-gray-400">Value</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-700">
+            <tr>
+              <td className="py-2 text-gray-300">Jitter</td>
+              <td className="py-2 text-white">{report.liveness?.jitter?.toFixed(4) || 'N/A'}</td>
+            </tr>
+            <tr>
+              <td className="py-2 text-gray-300">Shimmer</td>
+              <td className="py-2 text-white">{report.liveness?.shimmer?.toFixed(4) || 'N/A'}</td>
+            </tr>
+            <tr>
+              <td className="py-2 text-gray-300">HNR (Harmonics-to-Noise)</td>
+              <td className="py-2 text-white">{report.liveness?.hnr?.toFixed(2) || 'N/A'} dB</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white mb-2">Spectral Artifact Score</h3>
+        <p className="text-3xl font-bold text-white">{Math.round(report.artifact_score || 0)}%</p>
+        <p className="text-sm text-gray-400 mt-1">
+          {(report.artifact_score || 0) <= 30 ? 'No significant artifacts detected' : 'Potential synthetic artifacts present'}
+        </p>
+      </div>
+
+      {report.assessment && (
+        <div className="bg-gray-800 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-white mb-2">Overall Assessment</h3>
+          <p className="text-gray-300">{report.assessment}</p>
+        </div>
+      )}
+
+      <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4">
+        <div className="flex items-start gap-3">
+          <svg className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <h4 className="text-yellow-500 font-medium mb-1">Legal Disclaimer</h4>
+            <p className="text-yellow-200/80 text-sm">
+              This report is for investigative purposes only. It is not admissible as standalone legal evidence. 
+              Consult a certified forensic audio expert for legal proceedings.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={downloadReport}
+        className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-3 flex items-center justify-center gap-2 transition-colors"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Download Report
+      </button>
+    </div>
+  );
+}
+
+export default function VerifyPage() {
+  const { address, isConnected } = useWallet();
+
+  const [activeTab, setActiveTab] = useState('verify');
+  const [targetAddress, setTargetAddress] = useState('');
+  const [useOwnAddress, setUseOwnAddress] = useState(false);
+  const [profileStatus, setProfileStatus] = useState(null);
+  const [profileData, setProfileData] = useState(null);
+  const [checkingProfile, setCheckingProfile] = useState(false);
+
+  const [audioInputMode, setAudioInputMode] = useState('record');
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [fileName, setFileName] = useState('');
+
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [forensicReport, setForensicReport] = useState(null);
+  const [error, setError] = useState(null);
+
+  const effectiveAddress = useOwnAddress && isConnected ? address : targetAddress;
+
+  // Check profile when address changes
+  const checkProfile = useCallback(async (addr) => {
+    if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+      setProfileStatus(null);
+      setProfileData(null);
+      return;
+    }
+
+    setCheckingProfile(true);
+    setProfileStatus(null);
+    setProfileData(null);
+
+    try {
+      const provider = getProvider();
+      const contract = getVoiceVaultContract(provider);
+      const profile = await contract.getVoiceProfile(addr);
+
+      if (profile && profile.isActive) {
+        const registeredDate = new Date(Number(profile.timestamp) * 1000).toLocaleDateString();
+        setProfileStatus(`Profile found. Registered on ${registeredDate}.`);
+        setProfileData({
+          helperString: profile.helperString,
+          commitment: profile.commitment,
+          salt: profile.salt
+        });
+      } else {
+        setProfileStatus('No profile found for this address.');
+        setProfileData(null);
+      }
+    } catch {
+      setProfileStatus('No profile found for this address.');
+      setProfileData(null);
+    } finally {
+      setCheckingProfile(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      checkProfile(effectiveAddress);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [effectiveAddress, checkProfile]);
+
+  useEffect(() => {
+    if (useOwnAddress && isConnected) {
+      setTargetAddress(address);
+    }
+  }, [useOwnAddress, isConnected, address]);
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setAudioBlob(file);
+      setFileName(file.name);
+    }
+  };
+
+  const handleRecordingComplete = (blob) => {
+    setAudioBlob(blob);
+    setFileName('');
+  };
+
+  const handleVerify = async () => {
+    if (!audioBlob || !profileData) return;
+
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const response = await verifyVoice(
+        audioBlob,
+        profileData.helperString,
+        profileData.commitment,
+        profileData.salt
+      );
+
+      if (response.error) {
+        throw new Error(response.error);
+      }
+
+      setResult(response);
+    } catch (err) {
+      setError(err.message || 'Verification failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForensic = async () => {
+    if (!audioBlob || !profileData) return;
+
+    setLoading(true);
+    setError(null);
+    setForensicReport(null);
+
+    try {
+      const response = await forensicAnalysis(
+        audioBlob,
+        profileData.helperString,
+        profileData.commitment,
+        profileData.salt
+      );
+
+      if (response.error) {
+        throw new Error(response.error);
+      }
+
+      setForensicReport(response);
+    } catch (err) {
+      setError(err.message || 'Forensic analysis failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reset = () => {
+    setResult(null);
+    setForensicReport(null);
+    setAudioBlob(null);
+    setFileName('');
+    setError(null);
+  };
+
+  const canSubmit = audioBlob && profileData && !loading;
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white py-12 px-4">
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn {
+          animation: fadeIn 0.5s ease-out forwards;
+        }
+      `}</style>
+
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-3xl font-bold text-center mb-8">Voice Verification</h1>
+
+        {/* Tab Navigation */}
+        <div className="flex justify-center border-b border-gray-700 mb-8">
+          <TabButton active={activeTab === 'verify'} onClick={() => { setActiveTab('verify'); reset(); }}>
+            Verify a Voice
+          </TabButton>
+          <TabButton active={activeTab === 'forensic'} onClick={() => { setActiveTab('forensic'); reset(); }}>
+            Forensic Analysis
+          </TabButton>
+        </div>
+
+        {/* Show results or input form */}
+        {result ? (
+          <div className="space-y-6">
+            <ResultCard score={result.score} isDeepfake={result.is_deepfake} />
+            <ResultTable result={result} />
+            {result.recommendation && (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h4 className="text-gray-300 font-medium mb-1">Recommendation</h4>
+                <p className="text-white">{result.recommendation}</p>
+              </div>
+            )}
+            <button
+              onClick={reset}
+              className="w-full bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-6 py-3 transition-colors"
+            >
+              Verify Another
+            </button>
+          </div>
+        ) : forensicReport ? (
+          <div>
+            <ForensicReport report={forensicReport} />
+            <button
+              onClick={reset}
+              className="w-full mt-6 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-6 py-3 transition-colors"
+            >
+              Analyze Another
+            </button>
+          </div>
+        ) : (
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-6">
+            {/* Section A: Target Address */}
+            <div>
+              <h2 className="text-lg font-semibold mb-4">Target Address</h2>
+              
+              {isConnected && (
+                <label className="flex items-center gap-2 mb-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useOwnAddress}
+                    onChange={(e) => setUseOwnAddress(e.target.checked)}
+                    className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-gray-300">Verify against my own voice</span>
+                </label>
+              )}
+
+              <input
+                type="text"
+                value={targetAddress}
+                onChange={(e) => { setTargetAddress(e.target.value); setUseOwnAddress(false); }}
+                placeholder="Enter Ethereum address of registered user (0x...)"
+                disabled={useOwnAddress}
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              />
+
+              {checkingProfile && (
+                <div className="flex items-center gap-2 mt-2">
+                  <Spinner className="h-4 w-4" />
+                  <span className="text-gray-400 text-sm">Checking profile...</span>
+                </div>
+              )}
+
+              {!checkingProfile && profileStatus && (
+                <p className={`text-sm mt-2 ${profileData ? 'text-green-400' : 'text-red-400'}`}>
+                  {profileStatus}
+                </p>
+              )}
+            </div>
+
+            {/* Section B: Audio Input */}
+            <div>
+              <h2 className="text-lg font-semibold mb-4">Audio Sample</h2>
+              
+              <div className="flex gap-2 mb-4">
+                <SubTabButton active={audioInputMode === 'record'} onClick={() => setAudioInputMode('record')}>
+                  Record Live
+                </SubTabButton>
+                <SubTabButton active={audioInputMode === 'upload'} onClick={() => setAudioInputMode('upload')}>
+                  Upload File
+                </SubTabButton>
+              </div>
+
+              {audioInputMode === 'record' ? (
+                <AudioRecorder
+                  onRecordingComplete={handleRecordingComplete}
+                  minDurationSeconds={3}
+                  label="Record voice sample"
+                />
+              ) : (
+                <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center">
+                  <input
+                    type="file"
+                    accept=".wav,.mp3,.m4a,.webm,audio/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="audio-upload"
+                  />
+                  <label htmlFor="audio-upload" className="cursor-pointer">
+                    <svg className="w-12 h-12 text-gray-500 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="text-gray-400 mb-1">Click to upload audio file</p>
+                    <p className="text-gray-500 text-sm">.wav, .mp3, .m4a, .webm</p>
+                  </label>
+                  {fileName && (
+                    <p className="mt-4 text-green-400 text-sm">
+                      Selected: {fileName}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Error Display */}
+            {error && (
+              <div className="bg-red-900/50 border border-red-600 rounded-lg p-4">
+                <p className="text-red-400">{error}</p>
+              </div>
+            )}
+
+            {/* Section C: Submit Button */}
+            {activeTab === 'verify' ? (
+              <button
+                onClick={handleVerify}
+                disabled={!canSubmit}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg px-6 py-3 flex items-center justify-center gap-2 transition-colors"
+              >
+                {loading ? (
+                  <>
+                    <Spinner />
+                    Running AI analysis...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    Verify Voice
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={handleForensic}
+                disabled={!canSubmit}
+                className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg px-6 py-3 flex items-center justify-center gap-2 transition-colors"
+              >
+                {loading ? (
+                  <>
+                    <Spinner />
+                    Running forensic analysis...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                    </svg>
+                    Run Forensic Analysis
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
