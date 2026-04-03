@@ -4,7 +4,8 @@ import RecordRTC from 'recordrtc';
 export default function AudioRecorder({ 
   onRecordingComplete, 
   minDurationSeconds = 3, 
-  label = 'Record your voice' 
+  label = 'Record your voice',
+  allowFileUpload = true
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState('idle');
@@ -12,6 +13,7 @@ export default function AudioRecorder({
   const [audioUrl, setAudioUrl] = useState(null);
   const [error, setError] = useState(null);
   const [silenceWarning, setSilenceWarning] = useState(false);
+  const [microphoneAvailable, setMicrophoneAvailable] = useState(true);
 
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
@@ -22,6 +24,19 @@ export default function AudioRecorder({
   const timerRef = useRef(null);
   const silenceStartRef = useRef(null);
   const startTimeRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // Check microphone availability on mount
+  useEffect(() => {
+    navigator.mediaDevices?.getUserMedia({ audio: true })
+      .then(stream => {
+        stream.getTracks().forEach(t => t.stop());
+        setMicrophoneAvailable(true);
+      })
+      .catch(() => {
+        setMicrophoneAvailable(false);
+      });
+  }, []);
 
   const calculateRMS = (dataArray) => {
     let sum = 0;
@@ -203,6 +218,40 @@ export default function AudioRecorder({
     });
   };
 
+  // Handle file upload
+  const handleFileUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setError(null);
+    
+    // Validate file type
+    if (!file.type.startsWith('audio/')) {
+      setError('Please upload an audio file (WAV, MP3, M4A, etc.)');
+      return;
+    }
+
+    // Validate file size (10MB max)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File too large. Maximum size is 10MB.');
+      return;
+    }
+
+    setAudioUrl(URL.createObjectURL(file));
+    setStatus('Ready to submit');
+    setTimer(0);
+    drawIdleLine();
+
+    if (onRecordingComplete) {
+      onRecordingComplete(file);
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   // Setup canvas dimensions
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -292,15 +341,41 @@ export default function AudioRecorder({
       {/* Recording Controls */}
       <div className="flex justify-center gap-4 mb-4">
         {!isRecording ? (
-          <button
-            onClick={startRecording}
-            className="bg-red-600 hover:bg-red-700 text-white rounded-lg px-6 py-3 flex items-center gap-2 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
-            </svg>
-            Start Recording
-          </button>
+          <>
+            {microphoneAvailable ? (
+              <button
+                onClick={startRecording}
+                className="bg-red-600 hover:bg-red-700 text-white rounded-lg px-6 py-3 flex items-center gap-2 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                </svg>
+                Start Recording
+              </button>
+            ) : null}
+            
+            {/* File Upload Fallback */}
+            {allowFileUpload && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-3 flex items-center gap-2 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  Upload Audio
+                </button>
+              </>
+            )}
+          </>
         ) : (
           <button
             onClick={stopRecording}
@@ -314,11 +389,18 @@ export default function AudioRecorder({
         )}
       </div>
 
+      {/* Microphone unavailable warning */}
+      {!microphoneAvailable && allowFileUpload && (
+        <p className="text-center text-yellow-400 text-sm mb-4">
+          Microphone not available. Please upload an audio file instead.
+        </p>
+      )}
+
       {/* Playback */}
       {audioUrl && (
         <div className="border-t border-gray-700 pt-4">
           <p className="text-sm text-gray-400 mb-2">
-            Recorded: {timer} seconds
+            {timer > 0 ? `Recorded: ${timer} seconds` : 'Audio file loaded'}
           </p>
           <audio 
             src={audioUrl} 

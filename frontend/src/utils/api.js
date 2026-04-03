@@ -2,12 +2,18 @@ import axios from 'axios';
 
 const BASE = import.meta.env.VITE_BACKEND_URL;
 
+// Create axios instance with default timeout
+const api = axios.create({
+  baseURL: BASE,
+  timeout: 30000, // 30 second timeout
+});
+
 export async function registerVoice(audioBlob) {
   try {
     const formData = new FormData();
     formData.append('audio', audioBlob);
     
-    const response = await axios.post(`${BASE}/api/register`, formData, {
+    const response = await api.post('/api/register', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
@@ -24,7 +30,7 @@ export async function verifyVoice(audioBlob, helperString, commitment, salt) {
     formData.append('commitment', commitment);
     formData.append('salt', salt);
     
-    const response = await axios.post(`${BASE}/api/verify`, formData, {
+    const response = await api.post('/api/verify', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
@@ -41,7 +47,7 @@ export async function forensicAnalysis(audioBlob, helper, commitment, salt) {
     formData.append('commitment', commitment);
     formData.append('salt', salt);
     
-    const response = await axios.post(`${BASE}/api/forensic`, formData, {
+    const response = await api.post('/api/forensic', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
@@ -56,7 +62,7 @@ export async function detectClone(audioBlob, profiles) {
     formData.append('audio', audioBlob);
     formData.append('profiles', JSON.stringify(profiles));
     
-    const response = await axios.post(`${BASE}/api/detect_clone`, formData, {
+    const response = await api.post('/api/detect_clone', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
@@ -67,9 +73,23 @@ export async function detectClone(audioBlob, profiles) {
 
 export async function healthCheck() {
   try {
-    const response = await axios.get(`${BASE}/api/health`);
+    const response = await api.get('/api/health');
     return response.data;
   } catch (error) {
+    return { error: error.response?.data?.message || error.message };
+  }
+}
+
+export async function getProfile(address) {
+  try {
+    const response = await api.get('/api/get_profile', {
+      params: { address }
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response?.status === 404) {
+      return { error: 'not_found' };
+    }
     return { error: error.response?.data?.message || error.message };
   }
 }

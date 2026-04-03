@@ -5,6 +5,17 @@ import { getProvider, getSigner, getVoiceVaultContract } from '../utils/contract
 
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 
+function LoadingSkeleton() {
+  return (
+    <div className="animate-pulse space-y-4 py-4">
+      <div className="h-6 bg-gray-700 rounded w-1/3 mx-auto" />
+      <div className="h-12 bg-gray-700 rounded w-2/3 mx-auto" />
+      <div className="h-16 bg-gray-700 rounded w-full" />
+      <div className="h-16 bg-gray-700 rounded w-full" />
+    </div>
+  );
+}
+
 function Spinner({ className = 'h-6 w-6' }) {
   return (
     <svg className={`animate-spin ${className} text-blue-500`} viewBox="0 0 24 24">
@@ -76,12 +87,15 @@ export default function MyIdentityPage() {
     try {
       const provider = getProvider();
       const contract = getVoiceVaultContract(provider);
+      
+      // getVoiceProfile returns: (helperString, commitment, salt, registeredAt, isActive)
       const profileData = await contract.getVoiceProfile(address);
+      const [, , , registeredAt, isActive] = profileData;
 
-      if (profileData && profileData.isActive) {
+      if (isActive) {
         setProfile({
-          isActive: profileData.isActive,
-          registeredAt: new Date(Number(profileData.timestamp) * 1000)
+          isActive: isActive,
+          registeredAt: new Date(Number(registeredAt) * 1000)
         });
       } else {
         setProfile(null);
@@ -144,10 +158,7 @@ export default function MyIdentityPage() {
               <p className="text-yellow-400">Please switch to Sepolia network.</p>
             </div>
           ) : loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Spinner />
-              <span className="ml-3 text-gray-400">Loading profile...</span>
-            </div>
+            <LoadingSkeleton />
           ) : revoked ? (
             <div className="text-center py-8">
               <div className="w-16 h-16 rounded-full bg-gray-700 flex items-center justify-center mx-auto mb-4">

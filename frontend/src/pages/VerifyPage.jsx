@@ -2,7 +2,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { getProvider, getVoiceVaultContract } from '../utils/contracts';
 import { verifyVoice, forensicAnalysis } from '../utils/api';
+import { ethers } from 'ethers';
 import AudioRecorder from '../components/AudioRecorder';
+
+function LoadingSkeleton({ lines = 3 }) {
+  return (
+    <div className="animate-pulse space-y-3">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div
+          key={i}
+          className="h-4 bg-gray-700 rounded"
+          style={{ width: `${100 - i * 15}%` }}
+        />
+      ))}
+    </div>
+  );
+}
 
 function Spinner({ className = 'h-6 w-6' }) {
   return (
@@ -279,7 +294,7 @@ export default function VerifyPage() {
 
   const effectiveAddress = useOwnAddress && isConnected ? address : targetAddress;
 
-  // Check profile when address changes
+  // Check profile when address changes - fetch directly from blockchain
   const checkProfile = useCallback(async (addr) => {
     if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
       setProfileStatus(null);
@@ -294,15 +309,23 @@ export default function VerifyPage() {
     try {
       const provider = getProvider();
       const contract = getVoiceVaultContract(provider);
+      
+      // getVoiceProfile returns: (helperString, commitment, salt, registeredAt, isActive)
       const profile = await contract.getVoiceProfile(addr);
+      
+      // Destructure the tuple return
+      const [helperString, commitment, salt, registeredAt, isActive] = profile;
 
-      if (profile && profile.isActive) {
-        const registeredDate = new Date(Number(profile.timestamp) * 1000).toLocaleDateString();
+      if (isActive) {
+        const registeredDate = new Date(Number(registeredAt) * 1000).toLocaleDateString();
         setProfileStatus(`Profile found. Registered on ${registeredDate}.`);
+        
+        // helperString is bytes, commitment and salt are bytes32
+        // Convert to proper format for verification API
         setProfileData({
-          helperString: profile.helperString,
-          commitment: profile.commitment,
-          salt: profile.salt
+          helperString: typeof helperString === 'string' ? helperString : ethers.hexlify(helperString),
+          commitment: commitment,
+          salt: salt
         });
       } else {
         setProfileStatus('No profile found for this address.');
@@ -495,7 +518,11 @@ export default function VerifyPage() {
 
               {!checkingProfile && profileStatus && (
                 <p className={`text-sm mt-2 ${profileData ? 'text-green-400' : 'text-red-400'}`}>
-                  {profileStatus}
+                  {profileData ? (
+                    <>✓ {profileStatus}</>
+                  ) : (
+                    <>✗ {profileStatus} Registration required before verification.</>
+                  )}
                 </p>
               )}
             </div>

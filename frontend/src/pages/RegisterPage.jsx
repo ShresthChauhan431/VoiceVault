@@ -114,13 +114,19 @@ export default function RegisterPage() {
       setStep(5);
     } else if (regStatus === 'error') {
       setStep(3);
-      // Parse error messages
-      if (regError?.includes('4001') || regError?.includes('cancelled')) {
-        setError('Transaction cancelled. Your voice data was not stored anywhere. Try again.');
+      // Parse error messages with better UX
+      if (regError?.includes('4001') || regError?.includes('cancelled') || regError?.includes('ACTION_REJECTED')) {
+        setError('Transaction cancelled. Voice data was not stored. Try again when ready.');
+      } else if (regError?.includes('silence')) {
+        setError('No voice detected. Please re-record in a quieter environment and speak clearly.');
       } else if (regError?.includes('network') || regError?.includes('fetch') || regError?.includes('ECONNREFUSED')) {
-        setError('Connection error. Is the backend running on port 5000?');
+        setError('Connection error. Is the backend running? Check your internet connection.');
+      } else if (regError?.includes('model') || regError?.includes('503')) {
+        setError('AI model temporarily unavailable. Please try again in a moment.');
+      } else if (regError?.includes('timeout') || regError?.includes('408')) {
+        setError('Processing took too long. Please try again with a shorter recording.');
       } else {
-        setError(regError);
+        setError(regError || 'Registration failed. Please try again.');
       }
     }
   }, [regStatus, regError]);
@@ -273,7 +279,11 @@ export default function RegisterPage() {
               <Spinner />
               <p className="text-gray-300 mt-4">{processingMessage}</p>
               {regStatus === 'confirming' && (
-                <p className="text-gray-500 text-sm mt-2">Do not close this page.</p>
+                <div className="mt-4 bg-yellow-900/30 border border-yellow-600 rounded-lg p-3">
+                  <p className="text-yellow-400 text-sm">
+                    ⏱ Sepolia confirmations take 15-30 seconds. Please do not close this page.
+                  </p>
+                </div>
               )}
             </div>
           )}

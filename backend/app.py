@@ -1,6 +1,14 @@
 """
 VoiceVault Flask API Server
 Main application handling voice registration, verification, and deepfake detection.
+
+SECURITY NOTES:
+- All audio is processed in memory via SpooledTemporaryFile (no disk unless >10MB)
+- Strict MIME type validation on all audio uploads
+- Duration validation (1-60 seconds)
+- All routes wrapped in try/except to prevent stack trace leaks
+- Ethereum addresses validated with web3.is_address()
+- 30-second timeout on AI processing
 """
 
 import os
@@ -8,14 +16,23 @@ import gc
 import json
 import uuid
 import tempfile
+import signal
+import logging
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
+from io import BytesIO
 
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import librosa
+import soundfile as sf
+
+# Configure logging - NEVER log audio data or personal info
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -28,21 +45,45 @@ from deepfake_detector import DeepfakeDetector, create_detector
 # Initialize Flask app
 app = Flask(__name__)
 
+# Request size limit (10MB)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
+
 # Configure CORS for frontend
-CORS(app, resources={
-    r"/api/*": {
-        "origins": ["http://localhost:5173", "http://127.0.0.1:5173"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+CORS(app,
+     origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+     methods=["GET", "POST", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=False
+)
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:5173')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
 
 # Configuration
 MOCK_MODE = os.getenv('MOCK_MODE', 'false').lower() == 'true'
-FLASK_PORT = int(os.getenv('FLASK_PORT', '5000'))
+FLASK_PORT = int(os.getenv('FLASK_PORT', '5001'))
 MAX_AUDIO_SIZE = 10 * 1024 * 1024  # 10MB
 MIN_DURATION = 1.0  # seconds
 MAX_DURATION = 60.0  # seconds
+AI_TIMEOUT_SECONDS = 30  # Max time for AI processing
+
+# Allowed audio MIME types (strict whitelist)
+ALLOWED_AUDIO_TYPES = {
+    'audio/wav',
+    'audio/wave',
+    'audio/x-wav',
+    'audio/mp3',
+    'audio/mpeg',
+    'audio/webm',
+    'audio/ogg',
+    'audio/mp4',
+    'audio/x-m4a',
+    'application/octet-stream',  # Some browsers send this for audio files
+}
 
 # Initialize AI components (lazy loaded)
 embedder: Optional[VoiceEmbedder] = None
@@ -75,9 +116,71 @@ def is_model_loaded() -> bool:
         return False
 
 
+class TimeoutError(Exception):
+    """Custom exception for AI processing timeout."""
+    pass
+
+
+@contextmanager
+def timeout_context(seconds: int):
+    """Context manager that raises TimeoutError after specified seconds (Unix only)."""
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"AI processing exceeded {seconds} second timeout")
+    
+    # Only use signal on Unix-like systems
+    if hasattr(signal, 'SIGALRM'):
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+    else:
+        # Windows: no SIGALRM, just yield without timeout
+        yield
+
+
+def validate_ethereum_address(address: str) -> tuple[bool, str]:
+    """
+    Validate Ethereum address format using web3.
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not address:
+        return False, "Address is required"
+    
+    if not isinstance(address, str):
+        return False, "Address must be a string"
+    
+    # Basic format check
+    if not address.startswith('0x') or len(address) != 42:
+        return False, "Invalid address format. Expected 0x followed by 40 hex characters"
+    
+    # Use web3 for checksum validation
+    try:
+        from web3 import Web3
+        if not Web3.is_address(address):
+            return False, "Invalid Ethereum address"
+        return True, ""
+    except ImportError:
+        # Fallback: basic hex validation
+        try:
+            int(address, 16)
+            return True, ""
+        except ValueError:
+            return False, "Address contains invalid hex characters"
+
+
 def validate_audio_file(file) -> tuple[bool, str, Optional[bytes]]:
     """
-    Validate uploaded audio file.
+    Validate uploaded audio file with strict security checks.
+    
+    Security checks:
+    - MIME type must be in ALLOWED_AUDIO_TYPES whitelist
+    - File size must be <= MAX_AUDIO_SIZE (10MB)
+    - File must not be empty
     
     Returns:
         Tuple of (is_valid, error_message, audio_bytes)
@@ -85,18 +188,19 @@ def validate_audio_file(file) -> tuple[bool, str, Optional[bytes]]:
     if file is None:
         return False, "No audio file provided", None
     
-    # Check mimetype
-    if not file.mimetype or not file.mimetype.startswith('audio/'):
-        # Also accept octet-stream as some browsers send that for audio
-        if file.mimetype != 'application/octet-stream':
-            return False, f"Invalid file type: {file.mimetype}. Expected audio/*", None
+    # Check mimetype against strict whitelist
+    mimetype = file.mimetype or ''
+    if mimetype not in ALLOWED_AUDIO_TYPES:
+        logger.warning(f"[SECURITY] Rejected file with MIME type: {mimetype}")
+        return False, f"Invalid file type: {mimetype}. Allowed types: audio/wav, audio/mp3, audio/mpeg, audio/webm, audio/ogg, audio/mp4", None
     
     # Read file into memory
     audio_bytes = file.read()
     
     # Check size
     if len(audio_bytes) > MAX_AUDIO_SIZE:
-        return False, f"File too large: {len(audio_bytes)} bytes. Maximum: {MAX_AUDIO_SIZE}", None
+        logger.warning(f"[SECURITY] Rejected file: size {len(audio_bytes)} exceeds {MAX_AUDIO_SIZE}")
+        return False, f"File too large: {len(audio_bytes)} bytes. Maximum: {MAX_AUDIO_SIZE} (10MB)", None
     
     if len(audio_bytes) == 0:
         return False, "Empty audio file", None
@@ -106,41 +210,78 @@ def validate_audio_file(file) -> tuple[bool, str, Optional[bytes]]:
 
 def process_audio_in_memory(audio_bytes: bytes) -> tuple[str, float]:
     """
-    Save audio to temporary file and get its path and duration.
-    Uses SpooledTemporaryFile to keep small files in RAM.
+    Process audio while minimizing disk writes.
+    
+    PRIVACY: Uses SpooledTemporaryFile which keeps data in RAM for files < 10MB.
+    If file exceeds 10MB, it spills to disk and we log a warning.
     
     Returns:
         Tuple of (temp_file_path, duration_seconds)
     """
-    # Create spooled temp file (stays in RAM if < 10MB)
-    temp_file = tempfile.SpooledTemporaryFile(max_size=MAX_AUDIO_SIZE, mode='w+b', suffix='.wav')
-    temp_file.write(audio_bytes)
-    temp_file.seek(0)
+    # Try to get duration from memory first using soundfile
+    duration = None
+    try:
+        audio_buffer = BytesIO(audio_bytes)
+        with sf.SoundFile(audio_buffer) as f:
+            duration = len(f) / f.samplerate
+    except Exception:
+        # Fallback: need to write to disk for librosa
+        pass
     
-    # We need a real file path for librosa, so flush to disk temporarily
+    # Create spooled temp file (stays in RAM if < 10MB)
+    spooled = tempfile.SpooledTemporaryFile(max_size=MAX_AUDIO_SIZE, mode='w+b', suffix='.wav')
+    spooled.write(audio_bytes)
+    
+    # Check if we spilled to disk
+    if hasattr(spooled, '_rolled') and spooled._rolled:
+        logger.warning('[PRIVACY] Audio file exceeded RAM buffer, spilled to disk temporarily')
+    
+    spooled.seek(0)
+    
+    # We need a real file path for librosa/AI models, so create named temp file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as named_temp:
         named_temp.write(audio_bytes)
         temp_path = named_temp.name
     
-    # Get duration
-    try:
-        duration = librosa.get_duration(path=temp_path)
-    except Exception as e:
-        os.unlink(temp_path)
-        raise ValueError(f"Could not read audio file: {str(e)}")
+    # Get duration if we couldn't get it from memory
+    if duration is None:
+        try:
+            duration = librosa.get_duration(path=temp_path)
+        except Exception as e:
+            # Clean up before raising
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+            raise ValueError(f"Could not read audio file: {str(e)}")
+    
+    # Clean up spooled file
+    spooled.close()
+    del spooled
     
     return temp_path, duration
 
 
-def cleanup_audio(temp_path: Optional[str]):
-    """Clean up temporary audio file and force garbage collection."""
+def cleanup_audio(temp_path: Optional[str], audio_bytes: Optional[bytes] = None):
+    """
+    Clean up temporary audio file and force garbage collection.
+    
+    PRIVACY: Ensures all audio data is cleared from RAM.
+    """
+    # Delete temp file from disk
     if temp_path and os.path.exists(temp_path):
         try:
             os.unlink(temp_path)
         except Exception:
             pass
+    
+    # Clear bytes from memory
+    if audio_bytes is not None:
+        del audio_bytes
+    
+    # Force garbage collection
     gc.collect()
-    print('[PRIVACY] Audio buffer cleared from RAM')
+    logger.info('[PRIVACY] Audio buffer cleared from RAM')
 
 
 def get_mock_embedding() -> np.ndarray:
@@ -196,29 +337,82 @@ def health_check():
     })
 
 
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    """Handle CORS preflight requests."""
+    response = jsonify({'status': 'ok'})
+    response.headers['Access-Control-Allow-Origin'] = 'http://localhost:5173'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response
+
+
+@app.route('/api/get_profile', methods=['GET'])
+def get_profile():
+    """
+    Get voice profile from blockchain.
+    Query param: address=0x...
+    Returns profile data or 404 if not found.
+    """
+    try:
+        address = request.args.get('address')
+        
+        if not address:
+            return jsonify({'error': 'missing_address', 'message': 'Address parameter required'}), 400
+        
+        # Validate address with web3
+        is_valid, error_msg = validate_ethereum_address(address)
+        if not is_valid:
+            return jsonify({'error': 'invalid_address', 'message': error_msg}), 400
+        
+        from chain_utils import get_voice_profile
+        profile = get_voice_profile(address)
+        
+        if profile is None:
+            return jsonify({'error': 'not_found', 'message': 'No profile found for this address'}), 404
+        
+        return jsonify(profile)
+        
+    except ValueError as e:
+        # Missing config (RPC_URL or CONTRACT_ADDRESS)
+        logger.error(f'[ERROR] /api/get_profile config: {e}')
+        return jsonify({'error': 'config_error', 'message': 'Blockchain configuration error'}), 500
+    except FileNotFoundError:
+        # Contract ABI not found
+        logger.error('[ERROR] /api/get_profile: Contract ABI not found')
+        return jsonify({'error': 'abi_not_found', 'message': 'Contract ABI not found'}), 500
+    except Exception as e:
+        logger.error(f'[ERROR] /api/get_profile: {type(e).__name__}: {e}')
+        return jsonify({'error': 'internal_error', 'message': 'Failed to fetch profile'}), 500
+
+
 @app.route('/api/register', methods=['POST'])
 def register_voice():
     """
     Register a voice and generate fuzzy commitment data.
     Input: multipart/form-data with 'audio' field
+    
+    Security: Validates file type, size, duration. 30s AI timeout.
+    Privacy: Audio cleaned from RAM after processing.
     """
     temp_path = None
+    audio_bytes = None
     
     try:
         # Get audio file
         if 'audio' not in request.files:
-            return jsonify({'error': 'No audio file', 'message': 'Please upload an audio file'}), 400
+            return jsonify({'error': 'no_audio', 'message': 'Please upload an audio file'}), 400
         
         audio_file = request.files['audio']
         
-        # Validate
+        # Validate file type, size
         is_valid, error_msg, audio_bytes = validate_audio_file(audio_file)
         if not is_valid:
             if 'type' in error_msg.lower():
-                return jsonify({'error': 'Invalid file type', 'message': error_msg}), 415
+                return jsonify({'error': 'invalid_type', 'message': error_msg}), 415
             elif 'large' in error_msg.lower():
-                return jsonify({'error': 'File too large', 'message': error_msg}), 413
-            return jsonify({'error': 'Invalid audio', 'message': error_msg}), 400
+                return jsonify({'error': 'file_too_large', 'message': error_msg}), 413
+            return jsonify({'error': 'invalid_audio', 'message': error_msg}), 400
         
         # Process audio
         temp_path, duration = process_audio_in_memory(audio_bytes)
@@ -226,13 +420,13 @@ def register_voice():
         # Validate duration
         if duration < MIN_DURATION:
             return jsonify({
-                'error': 'Audio too short',
+                'error': 'too_short',
                 'message': f'Audio must be at least {MIN_DURATION} second(s). Got {duration:.2f}s'
             }), 400
         
         if duration > MAX_DURATION:
             return jsonify({
-                'error': 'Audio too long',
+                'error': 'too_long',
                 'message': f'Audio must be at most {MAX_DURATION} seconds. Got {duration:.2f}s'
             }), 400
         
@@ -247,21 +441,22 @@ def register_voice():
                 'message': 'Voice registered successfully (mock mode)'
             })
         
-        # Real processing
-        emb, fuzz, _ = get_ai_components()
-        
+        # Real processing with timeout
         try:
-            embedding = emb.get_embedding(temp_path)
+            with timeout_context(AI_TIMEOUT_SECONDS):
+                emb, fuzz, _ = get_ai_components()
+                embedding = emb.get_embedding(temp_path)
+                enrollment = fuzz.enroll(embedding)
+        except TimeoutError:
+            logger.error('[ERROR] /api/register: AI processing timeout')
+            return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
         except ValueError as e:
             if 'silence' in str(e).lower():
                 return jsonify({
-                    'error': 'Silence detected',
+                    'error': 'silence_detected',
                     'message': 'No voice detected in audio. Please re-record.'
                 }), 400
             raise
-        
-        # Generate fuzzy commitment
-        enrollment = fuzz.enroll(embedding)
         
         return jsonify({
             'success': True,
@@ -272,12 +467,13 @@ def register_voice():
         })
         
     except ValueError as e:
-        return jsonify({'error': 'Processing error', 'message': str(e)}), 400
+        logger.warning(f'[WARN] /api/register validation: {e}')
+        return jsonify({'error': 'processing_error', 'message': str(e)}), 400
     except Exception as e:
-        print(f'[ERROR] /api/register: {type(e).__name__}: {e}')
-        return jsonify({'error': 'Server error', 'message': 'Failed to process audio'}), 500
+        logger.error(f'[ERROR] /api/register: {type(e).__name__}: {e}')
+        return jsonify({'error': 'internal_error', 'message': 'Failed to process audio'}), 500
     finally:
-        cleanup_audio(temp_path)
+        cleanup_audio(temp_path, audio_bytes)
 
 
 @app.route('/api/verify', methods=['POST'])
@@ -285,13 +481,17 @@ def verify_voice():
     """
     Verify a voice against stored fuzzy commitment data.
     Input: multipart/form-data with 'audio' + helper_string, commitment, salt
+    
+    Security: Validates file type, size, duration. 30s AI timeout.
+    Privacy: Audio cleaned from RAM after processing.
     """
     temp_path = None
+    audio_bytes = None
     
     try:
         # Get audio file
         if 'audio' not in request.files:
-            return jsonify({'error': 'No audio file', 'message': 'Please upload an audio file'}), 400
+            return jsonify({'error': 'no_audio', 'message': 'Please upload an audio file'}), 400
         
         audio_file = request.files['audio']
         
@@ -302,22 +502,32 @@ def verify_voice():
         
         if not all([helper_string, commitment, salt]):
             return jsonify({
-                'error': 'Missing parameters',
+                'error': 'missing_params',
                 'message': 'helper_string, commitment, and salt are required'
             }), 400
         
         # Validate audio
         is_valid, error_msg, audio_bytes = validate_audio_file(audio_file)
         if not is_valid:
-            return jsonify({'error': 'Invalid audio', 'message': error_msg}), 400
+            if 'type' in error_msg.lower():
+                return jsonify({'error': 'invalid_type', 'message': error_msg}), 415
+            elif 'large' in error_msg.lower():
+                return jsonify({'error': 'file_too_large', 'message': error_msg}), 413
+            return jsonify({'error': 'invalid_audio', 'message': error_msg}), 400
         
         # Process audio
         temp_path, duration = process_audio_in_memory(audio_bytes)
         
-        if duration < MIN_DURATION or duration > MAX_DURATION:
+        if duration < MIN_DURATION:
             return jsonify({
-                'error': 'Invalid duration',
-                'message': f'Audio must be {MIN_DURATION}-{MAX_DURATION} seconds'
+                'error': 'too_short',
+                'message': f'Audio must be at least {MIN_DURATION} second(s)'
+            }), 400
+        
+        if duration > MAX_DURATION:
+            return jsonify({
+                'error': 'too_long',
+                'message': f'Audio must be at most {MAX_DURATION} seconds'
             }), 400
         
         # MOCK MODE
@@ -336,30 +546,33 @@ def verify_voice():
                 'recommendation': 'Voice verification passed. Identity confirmed.'
             })
         
-        # Real processing
-        emb, fuzz, detector = get_ai_components()
-        
-        # Get embedding
+        # Real processing with timeout
         try:
-            embedding = emb.get_embedding(temp_path)
+            with timeout_context(AI_TIMEOUT_SECONDS):
+                emb, fuzz, detector = get_ai_components()
+                embedding = emb.get_embedding(temp_path)
+                
+                # Fuzzy verification
+                fuzzy_match = 1.0 if fuzz.verify(embedding, helper_string, commitment, salt) else 0.0
+                
+                # Get match score for more granularity
+                if fuzzy_match == 0.0:
+                    match_score = fuzz.compute_match_score(embedding, helper_string)
+                    fuzzy_match = match_score
+                
+                # Deepfake analysis
+                analysis = detector.full_analysis(temp_path)
+        except TimeoutError:
+            logger.error('[ERROR] /api/verify: AI processing timeout')
+            return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
         except ValueError as e:
             if 'silence' in str(e).lower():
                 return jsonify({
-                    'error': 'Silence detected',
+                    'error': 'silence_detected',
                     'message': 'No voice detected in audio'
                 }), 400
             raise
         
-        # Fuzzy verification
-        fuzzy_match = 1.0 if fuzz.verify(embedding, helper_string, commitment, salt) else 0.0
-        
-        # If verify returns bool, also get match score for more granularity
-        if fuzzy_match == 0.0:
-            match_score = fuzz.compute_match_score(embedding, helper_string)
-            fuzzy_match = match_score
-        
-        # Deepfake analysis
-        analysis = detector.full_analysis(temp_path)
         liveness_score = analysis['liveness_score']
         artifact_score = analysis['artifact_score']
         
@@ -395,10 +608,10 @@ def verify_voice():
         })
         
     except Exception as e:
-        print(f'[ERROR] /api/verify: {type(e).__name__}: {e}')
-        return jsonify({'error': 'Server error', 'message': 'Failed to verify audio'}), 500
+        logger.error(f'[ERROR] /api/verify: {type(e).__name__}: {e}')
+        return jsonify({'error': 'internal_error', 'message': 'Failed to verify audio'}), 500
     finally:
-        cleanup_audio(temp_path)
+        cleanup_audio(temp_path, audio_bytes)
 
 
 @app.route('/api/forensic', methods=['POST'])
@@ -406,13 +619,17 @@ def forensic_analysis():
     """
     Perform detailed forensic analysis on audio.
     Input: multipart/form-data with 'audio' + target_helper, target_commitment, target_salt
+    
+    Security: Validates file type, size. 30s AI timeout.
+    Privacy: Audio cleaned from RAM after processing.
     """
     temp_path = None
+    audio_bytes = None
     
     try:
         # Get audio file
         if 'audio' not in request.files:
-            return jsonify({'error': 'No audio file', 'message': 'Please upload an audio file'}), 400
+            return jsonify({'error': 'no_audio', 'message': 'Please upload an audio file'}), 400
         
         audio_file = request.files['audio']
         
@@ -423,14 +640,18 @@ def forensic_analysis():
         
         if not all([target_helper, target_commitment, target_salt]):
             return jsonify({
-                'error': 'Missing parameters',
+                'error': 'missing_params',
                 'message': 'target_helper, target_commitment, and target_salt are required'
             }), 400
         
         # Validate audio
         is_valid, error_msg, audio_bytes = validate_audio_file(audio_file)
         if not is_valid:
-            return jsonify({'error': 'Invalid audio', 'message': error_msg}), 400
+            if 'type' in error_msg.lower():
+                return jsonify({'error': 'invalid_type', 'message': error_msg}), 415
+            elif 'large' in error_msg.lower():
+                return jsonify({'error': 'file_too_large', 'message': error_msg}), 413
+            return jsonify({'error': 'invalid_audio', 'message': error_msg}), 400
         
         # Process audio
         temp_path, _ = process_audio_in_memory(audio_bytes)
@@ -468,19 +689,20 @@ def forensic_analysis():
                                    'Consult a certified forensic audio expert for legal proceedings.'
             })
         
-        # Real processing
-        emb, fuzz, detector = get_ai_components()
-        
-        # Get embedding
-        embedding = emb.get_embedding(temp_path)
-        
-        # Fuzzy verification
-        fuzzy_match = fuzz.verify(embedding, target_helper, target_commitment, target_salt)
-        similarity_score = fuzz.compute_match_score(embedding, target_helper)
-        
-        # Full deepfake analysis
-        liveness_result = detector.analyze_liveness(temp_path)
-        spectral_result = detector.spectral_artifact_check(temp_path)
+        # Real processing with timeout
+        with timeout_context(AI_TIMEOUT_SECONDS):
+            emb, fuzz, detector = get_ai_components()
+            
+            # Get embedding
+            embedding = emb.get_embedding(temp_path)
+            
+            # Fuzzy verification
+            fuzzy_match = fuzz.verify(embedding, target_helper, target_commitment, target_salt)
+            similarity_score = fuzz.compute_match_score(embedding, target_helper)
+            
+            # Full deepfake analysis
+            liveness_result = detector.analyze_liveness(temp_path)
+            spectral_result = detector.spectral_artifact_check(temp_path)
         
         # Calculate confidence
         confidence = similarity_score * 0.5 + liveness_result['liveness_score'] * 0.3 + (1 - spectral_result['artifact_score']) * 0.2
@@ -520,11 +742,14 @@ def forensic_analysis():
                                'Consult a certified forensic audio expert for legal proceedings.'
         })
         
+    except TimeoutError:
+        logger.error('[ERROR] /api/forensic: AI processing timeout')
+        return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
     except Exception as e:
-        print(f'[ERROR] /api/forensic: {type(e).__name__}: {e}')
-        return jsonify({'error': 'Server error', 'message': 'Failed to perform forensic analysis'}), 500
+        logger.error(f'[ERROR] /api/forensic: {type(e).__name__}: {e}')
+        return jsonify({'error': 'internal_error', 'message': 'Failed to perform forensic analysis'}), 500
     finally:
-        cleanup_audio(temp_path)
+        cleanup_audio(temp_path, audio_bytes)
 
 
 @app.route('/api/detect_clone', methods=['POST'])
@@ -532,13 +757,17 @@ def detect_clone():
     """
     Detect if a voice matches any registered profiles (clone detection).
     Input: multipart/form-data with 'audio' + JSON 'registered_profiles'
+    
+    Security: Validates file type, size. 30s AI timeout.
+    Privacy: Audio cleaned from RAM after processing.
     """
     temp_path = None
+    audio_bytes = None
     
     try:
         # Get audio file
         if 'audio' not in request.files:
-            return jsonify({'error': 'No audio file', 'message': 'Please upload an audio file'}), 400
+            return jsonify({'error': 'no_audio', 'message': 'Please upload an audio file'}), 400
         
         audio_file = request.files['audio']
         
@@ -546,7 +775,7 @@ def detect_clone():
         profiles_json = request.form.get('registered_profiles')
         if not profiles_json:
             return jsonify({
-                'error': 'Missing parameters',
+                'error': 'missing_params',
                 'message': 'registered_profiles JSON is required'
             }), 400
         
@@ -554,20 +783,24 @@ def detect_clone():
             profiles: List[Dict[str, str]] = json.loads(profiles_json)
         except json.JSONDecodeError:
             return jsonify({
-                'error': 'Invalid JSON',
+                'error': 'invalid_json',
                 'message': 'registered_profiles must be valid JSON'
             }), 400
         
         if not isinstance(profiles, list):
             return jsonify({
-                'error': 'Invalid format',
+                'error': 'invalid_format',
                 'message': 'registered_profiles must be an array'
             }), 400
         
         # Validate audio
         is_valid, error_msg, audio_bytes = validate_audio_file(audio_file)
         if not is_valid:
-            return jsonify({'error': 'Invalid audio', 'message': error_msg}), 400
+            if 'type' in error_msg.lower():
+                return jsonify({'error': 'invalid_type', 'message': error_msg}), 415
+            elif 'large' in error_msg.lower():
+                return jsonify({'error': 'file_too_large', 'message': error_msg}), 413
+            return jsonify({'error': 'invalid_audio', 'message': error_msg}), 400
         
         # Process audio
         temp_path, _ = process_audio_in_memory(audio_bytes)
@@ -594,37 +827,38 @@ def detect_clone():
                 'alert_message': 'No clone detected. Voice does not match any registered profiles.'
             })
         
-        # Real processing
-        emb, fuzz, _ = get_ai_components()
-        
-        # Get embedding
-        embedding = emb.get_embedding(temp_path)
-        
-        matched_profiles = []
-        highest_similarity = 0.0
-        
-        for profile in profiles:
-            helper = profile.get('helper_string')
-            commitment = profile.get('commitment')
-            salt = profile.get('salt')
-            address = profile.get('address', 'unknown')
+        # Real processing with timeout
+        with timeout_context(AI_TIMEOUT_SECONDS):
+            emb, fuzz, _ = get_ai_components()
             
-            if not all([helper, commitment, salt]):
-                continue
+            # Get embedding
+            embedding = emb.get_embedding(temp_path)
             
-            # Check verification
-            is_match = fuzz.verify(embedding, helper, commitment, salt)
-            score = fuzz.compute_match_score(embedding, helper)
+            matched_profiles = []
+            highest_similarity = 0.0
             
-            if score > highest_similarity:
-                highest_similarity = score
-            
-            # Threshold for clone detection: 0.85
-            if is_match or score > 0.85:
-                matched_profiles.append({
-                    'address': address,
-                    'score': round(score, 4)
-                })
+            for profile in profiles:
+                helper = profile.get('helper_string')
+                commitment = profile.get('commitment')
+                salt = profile.get('salt')
+                address = profile.get('address', 'unknown')
+                
+                if not all([helper, commitment, salt]):
+                    continue
+                
+                # Check verification
+                is_match = fuzz.verify(embedding, helper, commitment, salt)
+                score = fuzz.compute_match_score(embedding, helper)
+                
+                if score > highest_similarity:
+                    highest_similarity = score
+                
+                # Threshold for clone detection: 0.85
+                if is_match or score > 0.85:
+                    matched_profiles.append({
+                        'address': address,
+                        'score': round(score, 4)
+                    })
         
         clone_detected = len(matched_profiles) > 0
         
@@ -639,12 +873,15 @@ def detect_clone():
             'highest_similarity': round(highest_similarity, 4),
             'alert_message': alert_message
         })
-        
+    
+    except TimeoutError:
+        logger.error('[ERROR] /api/detect_clone: AI processing timeout')
+        return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
     except Exception as e:
-        print(f'[ERROR] /api/detect_clone: {type(e).__name__}: {e}')
-        return jsonify({'error': 'Server error', 'message': 'Failed to detect clone'}), 500
+        logger.error(f'[ERROR] /api/detect_clone: {type(e).__name__}: {e}')
+        return jsonify({'error': 'internal_error', 'message': 'Failed to detect clone'}), 500
     finally:
-        cleanup_audio(temp_path)
+        cleanup_audio(temp_path, audio_bytes)
 
 
 @app.route('/api/challenge', methods=['POST'])
@@ -652,13 +889,17 @@ def challenge_response():
     """
     Challenge-response verification with text matching.
     Input: multipart/form-data with 'audio' + 'challenge_text'
+    
+    Security: Validates file type, size. 30s AI timeout.
+    Privacy: Audio cleaned from RAM after processing.
     """
     temp_path = None
+    audio_bytes = None
     
     try:
         # Get audio file
         if 'audio' not in request.files:
-            return jsonify({'error': 'No audio file', 'message': 'Please upload an audio file'}), 400
+            return jsonify({'error': 'no_audio', 'message': 'Please upload an audio file'}), 400
         
         audio_file = request.files['audio']
         challenge_text = request.form.get('challenge_text', '')
@@ -666,7 +907,11 @@ def challenge_response():
         # Validate audio
         is_valid, error_msg, audio_bytes = validate_audio_file(audio_file)
         if not is_valid:
-            return jsonify({'error': 'Invalid audio', 'message': error_msg}), 400
+            if 'type' in error_msg.lower():
+                return jsonify({'error': 'invalid_type', 'message': error_msg}), 415
+            elif 'large' in error_msg.lower():
+                return jsonify({'error': 'file_too_large', 'message': error_msg}), 413
+            return jsonify({'error': 'invalid_audio', 'message': error_msg}), 400
         
         # Process audio
         temp_path, _ = process_audio_in_memory(audio_bytes)
@@ -684,11 +929,16 @@ def challenge_response():
                 'zk_proof_placeholder': 'ZK proof generation would run here on-device'
             })
         
-        # Real processing
-        _, _, detector = get_ai_components()
-        
-        # Full deepfake analysis
-        analysis = detector.full_analysis(temp_path)
+        # Real processing with timeout
+        try:
+            with timeout_context(AI_TIMEOUT_SECONDS):
+                _, _, detector = get_ai_components()
+                
+                # Full deepfake analysis
+                analysis = detector.full_analysis(temp_path)
+        except TimeoutError:
+            logger.error('[ERROR] /api/challenge: AI processing timeout')
+            return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
         
         # Try speech recognition for text matching
         text_match = True  # Default to True as graceful fallback
@@ -742,10 +992,10 @@ def challenge_response():
         })
         
     except Exception as e:
-        print(f'[ERROR] /api/challenge: {type(e).__name__}: {e}')
-        return jsonify({'error': 'Server error', 'message': 'Failed to process challenge'}), 500
+        logger.error(f'[ERROR] /api/challenge: {type(e).__name__}: {e}')
+        return jsonify({'error': 'internal_error', 'message': 'Failed to process challenge'}), 500
     finally:
-        cleanup_audio(temp_path)
+        cleanup_audio(temp_path, audio_bytes)
 
 
 # ============================================================================

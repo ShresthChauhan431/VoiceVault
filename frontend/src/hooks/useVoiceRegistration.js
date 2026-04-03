@@ -29,8 +29,14 @@ export function useVoiceRegistration() {
       const signer = await getSigner();
       const contract = getVoiceVaultContract(signer);
 
-      // Convert helper_string to bytes, commitment and salt to bytes32
-      const helperBytes = ethers.toUtf8Bytes(helper_string);
+      // helper_string from backend is a hex string (no 0x prefix)
+      // For Solidity bytes, we need to pass it as 0x-prefixed hex
+      const helperBytes = helper_string.startsWith('0x') 
+        ? helper_string 
+        : `0x${helper_string}`;
+      
+      // commitment and salt are already 64 hex chars from Python hashlib
+      // Just add 0x prefix if not present
       const commitmentBytes32 = commitment.startsWith('0x') ? commitment : `0x${commitment}`;
       const saltBytes32 = salt.startsWith('0x') ? salt : `0x${salt}`;
 
