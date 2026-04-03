@@ -78,6 +78,10 @@ class VoiceEmbedder:
         # Load audio at 16kHz mono
         audio, sr = librosa.load(file_path, sr=16000, mono=True)
         
+        # DEBUG: Log raw audio stats
+        print(f"[DEBUG EMBEDDER] Audio duration: {len(audio)/sr:.2f}s, samples: {len(audio)}")
+        print(f"[DEBUG EMBEDDER] Raw audio - min: {audio.min():.4f}, max: {audio.max():.4f}, mean: {audio.mean():.6f}")
+        
         # Normalize amplitude to [-1, 1]
         max_amplitude = np.max(np.abs(audio))
         if max_amplitude > 0:
@@ -106,6 +110,8 @@ class VoiceEmbedder:
         
         # Silence detection: check RMS energy
         rms_energy = np.sqrt(np.mean(audio ** 2))
+        print(f"[DEBUG EMBEDDER] After noise gate - RMS energy: {rms_energy:.4f}, max: {np.max(np.abs(audio)):.4f}")
+        
         if rms_energy < 0.01:
             raise ValueError("Silence detected. Please re-record.")
         
@@ -123,12 +129,22 @@ class VoiceEmbedder:
             
         Returns:
             L2-normalized numpy float32 array of shape (192,)
+            
+        Raises:
+            RuntimeError: If model failed to load
         """
         # Preprocess audio
         audio_tensor = self.preprocess_audio(file_path)
         
         # Load model if not already loaded
         model = self._load_model()
+        
+        # CRITICAL: Verify model actually loaded
+        if model is None:
+            raise RuntimeError(
+                "CRITICAL: SpeechBrain model failed to load. "
+                "Set MOCK_MODE=true in .env or ensure speechbrain is properly installed."
+            )
         
         # Move audio to device
         audio_tensor = audio_tensor.to(self.device)
@@ -140,10 +156,18 @@ class VoiceEmbedder:
         # Convert to numpy and squeeze
         embedding = embedding.squeeze().cpu().numpy()
         
+        # DEBUG: Log embedding before normalization
+        print(f"[DEBUG EMBEDDER] Raw embedding shape: {embedding.shape}")
+        print(f"[DEBUG EMBEDDER] Raw embedding - min: {embedding.min():.4f}, max: {embedding.max():.4f}, mean: {embedding.mean():.6f}")
+        
         # L2 normalize
         norm = np.linalg.norm(embedding)
+        print(f"[DEBUG EMBEDDER] Embedding L2 norm before normalization: {norm:.4f}")
+        
         if norm > 0:
             embedding = embedding / norm
+        else:
+            print("[WARNING EMBEDDER] Zero norm embedding detected!")
         
         return embedding.astype(np.float32)
     

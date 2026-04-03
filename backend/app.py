@@ -18,6 +18,7 @@ import uuid
 import tempfile
 import signal
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -121,14 +122,27 @@ class TimeoutError(Exception):
     pass
 
 
+def _is_main_thread() -> bool:
+    """Check if current thread is the main thread."""
+    return threading.current_thread() is threading.main_thread()
+
+
 @contextmanager
 def timeout_context(seconds: int):
-    """Context manager that raises TimeoutError after specified seconds (Unix only)."""
-    def timeout_handler(signum, frame):
-        raise TimeoutError(f"AI processing exceeded {seconds} second timeout")
+    """
+    Context manager that raises TimeoutError after specified seconds.
     
-    # Only use signal on Unix-like systems
-    if hasattr(signal, 'SIGALRM'):
+    Note: Signal-based timeout only works in main thread on Unix.
+    In worker threads (Flask dev server), timeout is disabled but processing continues.
+    For production, use gunicorn with --timeout flag instead.
+    """
+    # Only use signal-based timeout on Unix AND in main thread
+    can_use_signal = hasattr(signal, 'SIGALRM') and _is_main_thread()
+    
+    if can_use_signal:
+        def timeout_handler(signum, frame):
+            raise TimeoutError(f"AI processing exceeded {seconds} second timeout")
+        
         old_handler = signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(seconds)
         try:
@@ -137,7 +151,10 @@ def timeout_context(seconds: int):
             signal.alarm(0)
             signal.signal(signal.SIGALRM, old_handler)
     else:
-        # Windows: no SIGALRM, just yield without timeout
+        # Worker thread or Windows: no signal timeout available
+        # Log warning but proceed without timeout protection
+        if not _is_main_thread():
+            logger.debug('[TIMEOUT] Running in worker thread - signal timeout disabled')
         yield
 
 
@@ -550,18 +567,51 @@ def verify_voice():
         try:
             with timeout_context(AI_TIMEOUT_SECONDS):
                 emb, fuzz, detector = get_ai_components()
+                
+                # Verify model is actually loaded
+                if emb.model is None:
+                    logger.error('[CRITICAL] Voice embedder model is None despite MOCK_MODE=false')
+                    raise RuntimeError('Voice embedding model failed to load')
+                
                 embedding = emb.get_embedding(temp_path)
+                
+                # ========== DEBUG LOGGING START ==========
+                logger.info(f'[DEBUG] Input embedding shape: {embedding.shape}')
+                logger.info(f'[DEBUG] Input embedding first 10 values: {embedding[:10]}')
+                logger.info(f'[DEBUG] Input embedding mean: {embedding.mean():.6f}, std: {embedding.std():.6f}')
+                logger.info(f'[DEBUG] Input embedding norm: {np.linalg.norm(embedding):.6f}')
+                
+                # Decode the stored helper_string to get stored binary for comparison
+                try:
+                    stored_binary = bytes.fromhex(helper_string).decode()
+                    new_binary = fuzz.quantize_embedding(embedding)
+                    
+                    # Compute raw hamming distance
+                    if len(stored_binary) == len(new_binary) == 192:
+                        hamming_dist = sum(c1 != c2 for c1, c2 in zip(stored_binary, new_binary))
+                        logger.info(f'[DEBUG] Stored binary first 20: {stored_binary[:20]}')
+                        logger.info(f'[DEBUG] New binary first 20: {new_binary[:20]}')
+                        logger.info(f'[DEBUG] Raw Hamming distance: {hamming_dist}/192 ({100*hamming_dist/192:.1f}% different)')
+                except Exception as he:
+                    logger.warning(f'[DEBUG] Could not decode helper for comparison: {he}')
+                # ========== DEBUG LOGGING END ==========
                 
                 # Fuzzy verification
                 fuzzy_match = 1.0 if fuzz.verify(embedding, helper_string, commitment, salt) else 0.0
+                logger.info(f'[DEBUG] Fuzzy verify() returned: {fuzzy_match}')
                 
                 # Get match score for more granularity
                 if fuzzy_match == 0.0:
                     match_score = fuzz.compute_match_score(embedding, helper_string)
+                    logger.info(f'[DEBUG] compute_match_score() returned: {match_score:.4f}')
                     fuzzy_match = match_score
+                
+                logger.info(f'[DEBUG] Final fuzzy_match value: {fuzzy_match:.4f}')
                 
                 # Deepfake analysis
                 analysis = detector.full_analysis(temp_path)
+                logger.info(f'[DEBUG] Liveness score: {analysis["liveness_score"]:.4f}')
+                logger.info(f'[DEBUG] Artifact score: {analysis["artifact_score"]:.4f}')
         except TimeoutError:
             logger.error('[ERROR] /api/verify: AI processing timeout')
             return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
@@ -576,11 +626,27 @@ def verify_voice():
         liveness_score = analysis['liveness_score']
         artifact_score = analysis['artifact_score']
         
+        # ========== CRITICAL FIX: Identity mismatch detection ==========
+        # If fuzzy_match is below 0.85 (>15% bit difference), this is likely a different person
+        # Override status to reflect this regardless of liveness/artifact scores
+        identity_mismatch = fuzzy_match < 0.85
+        if identity_mismatch:
+            logger.warning(f'[IDENTITY] Fuzzy match {fuzzy_match:.2f} below 0.85 threshold - likely different person')
+        # ================================================================
+        
         # Combined score
         combined_score = fuzzy_match * 0.60 + liveness_score * 0.25 + (1 - artifact_score) * 0.15
+        logger.info(f'[DEBUG] Combined score calculation: {fuzzy_match:.4f}*0.60 + {liveness_score:.4f}*0.25 + (1-{artifact_score:.4f})*0.15 = {combined_score:.4f}')
         
         # Determine status and confidence
-        if combined_score >= 0.90:
+        # CRITICAL: If identity doesn't match, force rejection regardless of other scores
+        if identity_mismatch:
+            status = 'Deepfake'
+            confidence_level = 'REJECTED'
+            recommendation = 'Voice does not match registered profile. Identity verification failed.'
+            # Also cap the score to reflect the mismatch
+            combined_score = min(combined_score, 0.55)  # Cap at 55% if identity mismatch
+        elif combined_score >= 0.90:
             status = 'Authentic'
             confidence_level = 'HIGH'
             recommendation = 'Voice verification passed. Identity confirmed with high confidence.'
@@ -604,6 +670,8 @@ def verify_voice():
             'is_deepfake': analysis['is_likely_deepfake'],
             'liveness_score': round(liveness_score, 4),
             'artifact_score': round(artifact_score, 4),
+            'fuzzy_match': round(fuzzy_match, 4),  # Return this for debugging
+            'identity_mismatch': identity_mismatch,  # New field
             'recommendation': recommendation
         })
         
@@ -1066,4 +1134,16 @@ curl -X POST http://localhost:{FLASK_PORT}/api/challenge \\
 
 """)
     
-    app.run(host='0.0.0.0', port=FLASK_PORT, debug=True)
+    # Pre-load AI models at startup (not lazily on first request)
+    if not MOCK_MODE:
+        print("\n⏳ Loading AI models (this may take 30-60 seconds on first run)...")
+        try:
+            emb, fuzzy, detector = get_ai_components()
+            emb._load_model()  # Force model load
+            print("✅ AI models loaded successfully!")
+            print(f"   - Embedder model: {emb.model is not None}")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not pre-load models: {e}")
+            print("   Models will load lazily on first request (may timeout)")
+    
+    app.run(host='0.0.0.0', port=FLASK_PORT, debug=True, use_reloader=False)

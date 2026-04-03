@@ -227,9 +227,13 @@ class VoiceFuzzyExtractor:
             if len(stored_binary) == self.embedding_dim and all(c in '01' for c in stored_binary):
                 distance = self._hamming_distance(new_binary, stored_binary)
                 # Convert distance to similarity score
+                # Score of 1.0 = perfect match (0 bits different)
+                # Score of 0.0 = complete mismatch (192 bits different)
                 score = 1.0 - (distance / self.embedding_dim)
+                print(f"[DEBUG FUZZY] compute_match_score: Hamming distance = {distance}/{self.embedding_dim}, score = {score:.4f}")
                 return max(0.0, score)
-        except Exception:
+        except Exception as e:
+            print(f"[DEBUG FUZZY] compute_match_score exception: {e}")
             pass
         
         return 0.0
