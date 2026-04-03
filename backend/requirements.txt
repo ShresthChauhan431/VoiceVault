@@ -9,7 +9,6 @@ scipy
 web3
 python-dotenv
 fuzzy-extractor
-tenseal
 flwr
 soundfile
 pydub
