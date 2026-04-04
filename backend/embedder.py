@@ -117,7 +117,7 @@ class VoiceEmbedder:
     
     def preprocess_audio(self, file_path: str) -> torch.Tensor:
         """
-        Load and preprocess audio for embedding extraction.
+        Load and preprocess audio for embedding extraction with strict standardization.
         
         Args:
             file_path: Path to the audio file
@@ -126,35 +126,44 @@ class VoiceEmbedder:
             Preprocessed audio tensor of shape [1, samples]
             
         Raises:
-            ValueError: If silence is detected (RMS energy < 0.01)
+            ValueError: If audio too short after silence removal
             FileNotFoundError: If the audio file doesn't exist
             
-        Note: ECAPA-TDNN works best with minimal preprocessing.
-              Aggressive noise gates destroy speaker identity information.
+        Note: This preprocessing is applied identically for both registration 
+              and verification to ensure consistent embeddings.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Audio file not found: {file_path}")
         
-        # Load audio at 16kHz mono
-        audio, sr = librosa.load(file_path, sr=16000, mono=True)
+        sr = 16000  # Target sample rate
         
-        # DEBUG: Log raw audio stats
-        print(f"[DEBUG EMBEDDER] Audio duration: {len(audio)/sr:.2f}s, samples: {len(audio)}")
-        print(f"[DEBUG EMBEDDER] Raw audio - min: {audio.min():.4f}, max: {audio.max():.4f}, mean: {audio.mean():.6f}")
+        # Step 1: Load audio at exactly 16kHz mono
+        audio, _ = librosa.load(file_path, sr=sr, mono=True)
+        print(f"[EMBEDDER] Loaded audio: {len(audio)/sr:.2f}s, {len(audio)} samples")
         
-        # Simple peak normalization to [-1, 1] - preserve speaker characteristics
-        max_amplitude = np.max(np.abs(audio))
-        if max_amplitude > 0:
-            audio = audio / max_amplitude
+        # Step 2: Trim leading and trailing silence
+        audio, _ = librosa.effects.trim(audio, top_db=20)
+        print(f"[EMBEDDER] After trim: {len(audio)/sr:.2f}s")
         
-        # Silence detection: check RMS energy of normalized audio
-        rms_energy = np.sqrt(np.mean(audio ** 2))
-        print(f"[DEBUG EMBEDDER] Normalized audio - RMS energy: {rms_energy:.4f}, max: {np.max(np.abs(audio)):.4f}")
+        # Step 3: Check minimum length (1 second)
+        if len(audio) < sr:
+            raise ValueError("Audio too short after silence removal. Please record at least 2 seconds of speech.")
         
-        if rms_energy < 0.01:
-            raise ValueError("Silence detected. Please re-record.")
+        # Step 4: Normalize to consistent RMS level
+        target_rms = 0.05
+        current_rms = np.sqrt(np.mean(audio ** 2))
+        if current_rms > 0:
+            audio = audio * (target_rms / current_rms)
+        audio = np.clip(audio, -1.0, 1.0)
+        print(f"[EMBEDDER] After RMS normalization: rms={np.sqrt(np.mean(audio**2)):.4f}")
         
-        # Convert to torch tensor with shape [1, samples]
+        # Step 5: If audio > 8 seconds, take middle 6 seconds
+        if len(audio) > sr * 8:
+            start = (len(audio) - sr * 6) // 2
+            audio = audio[start: start + sr * 6]
+            print(f"[EMBEDDER] Trimmed to middle 6s: {len(audio)/sr:.2f}s")
+        
+        # Step 6: Convert to torch tensor with shape [1, samples]
         audio_tensor = torch.tensor(audio, dtype=torch.float32).unsqueeze(0)
         
         return audio_tensor
@@ -215,28 +224,25 @@ class VoiceEmbedder:
         """
         Compute cosine similarity between two embeddings.
         
-        Args:
-            emb1: First embedding (numpy array)
-            emb2: Second embedding (numpy array)
-            
-        Returns:
-            Cosine similarity score between 0.0 and 1.0
-            
-        Note: For ECAPA-TDNN voice embeddings:
-            - Same speaker re-recording: typically 0.85 - 0.99
-            - Different speakers: typically 0.20 - 0.60
+        Returns raw cosine similarity in [0.0, 1.0] range.
+        Typical ECAPA-TDNN values:
+            - Same speaker re-recording: 0.35-0.50
+            - Different speaker: 0.15-0.30
+            - AI clone of same speaker: 0.40-0.55 (often higher than real!)
+            - Identical audio: 1.0
         """
         # Ensure embeddings are normalized
-        emb1_norm = emb1 / (np.linalg.norm(emb1) + 1e-10)
-        emb2_norm = emb2 / (np.linalg.norm(emb2) + 1e-10)
+        emb1_norm = emb1 / (np.linalg.norm(emb1) + 1e-8)
+        emb2_norm = emb2 / (np.linalg.norm(emb2) + 1e-8)
         
-        # Compute cosine similarity (dot product of normalized vectors)
-        similarity = np.dot(emb1_norm, emb2_norm)
+        # Compute raw cosine similarity (dot product of normalized vectors)
+        raw = float(np.dot(emb1_norm, emb2_norm))
         
-        # For voice verification: keep raw cosine similarity 
-        # ECAPA-TDNN produces positive-dominant embeddings, so similarity is typically [0.2, 1.0]
-        # We clamp negative values (very different voices) to 0
-        return float(np.clip(similarity, 0.0, 1.0))
+        # Clamp to [0, 1] - negative cosine means very different, treat as 0
+        clamped = max(0.0, raw)
+        
+        print(f"[EMBEDDER] Cosine: raw={raw:.4f}, clamped={clamped:.4f}")
+        return clamped
 
 
 # Module-level singleton getter

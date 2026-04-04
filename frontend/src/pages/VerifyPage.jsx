@@ -58,44 +58,66 @@ function SubTabButton({ active, onClick, children }) {
   );
 }
 
-function ResultCard({ score, isDeepfake }) {
+function ResultCard({ score, isDeepfake, verdict, result }) {
   let color, icon, title, subtitle;
 
-  // Thresholds aligned with backend: 33/28/20
-  if (score >= 33 && !isDeepfake) {
-    color = '#10B981';
-    title = 'AUTHENTIC';
-    subtitle = 'Identity verified.';
-    icon = (
-      <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-      </svg>
-    );
-  } else if (score >= 28 && !isDeepfake) {
+  // Check if any individual metric row is red (for amber override)
+  const hasRedMetric = result && (
+    (result.liveness_score !== undefined && result.liveness_score < 0.70) ||
+    (result.artifact_score !== undefined && result.artifact_score > 0.30) ||
+    (result.fuzzy_match === false)
+  );
+
+  // Verdict-driven display logic
+  const v = (verdict || '').toLowerCase();
+
+  if (v === 'authentic' && score >= 40 && !isDeepfake) {
+    // Override: if any metric row is red, force amber instead of green
+    if (hasRedMetric) {
+      color = '#FBBF24';
+      title = 'AUTHENTIC';
+      subtitle = 'Identity verified, but some metrics flagged.';
+      icon = (
+        <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      );
+    } else {
+      color = '#10B981';
+      title = 'AUTHENTIC';
+      subtitle = 'Identity verified.';
+      icon = (
+        <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        </svg>
+      );
+    }
+  } else if (v === 'uncertain') {
     color = '#FBBF24';
-    title = 'SUSPICIOUS';
-    subtitle = 'Step-up auth recommended.';
+    title = 'LOW CONFIDENCE';
+    subtitle = 'Verification passed with low confidence.';
     icon = (
       <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
     );
-  } else if (score >= 20 && !isDeepfake) {
-    color = '#F97316';
-    title = 'UNCERTAIN';
-    subtitle = 'Could not confirm identity.';
-    icon = (
-      <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    );
-  } else {
+  } else if (v === 'deepfake_detected') {
     color = '#EF4444';
     title = 'DEEPFAKE DETECTED';
     subtitle = 'This audio is not authentic.';
     icon = (
       <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    );
+  } else {
+    // 'rejected' or fallback
+    color = '#EF4444';
+    title = 'REJECTED';
+    subtitle = 'Voice verification failed.';
+    icon = (
+      <svg className="w-16 h-16" fill="none" stroke={color} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
       </svg>
     );
   }
@@ -115,10 +137,9 @@ function ResultCard({ score, isDeepfake }) {
 
 function ResultTable({ result }) {
   const getAssessment = (score) => {
-    // Thresholds aligned with backend: 33/28/20
-    if (score >= 33) return { text: 'HIGH', color: 'text-green-400' };
-    if (score >= 28) return { text: 'MED', color: 'text-yellow-400' };
-    if (score >= 20) return { text: 'LOW', color: 'text-orange-400' };
+    // Thresholds aligned with backend: 40/25 (new scoring formula)
+    if (score >= 40) return { text: 'HIGH', color: 'text-green-400' };
+    if (score >= 25) return { text: 'LOW', color: 'text-yellow-400' };
     return { text: 'REJ', color: 'text-red-400' };
   };
 
@@ -480,12 +501,16 @@ export default function VerifyPage() {
         {/* Show results or input form */}
         {result ? (
           <div className="space-y-6">
-            <ResultCard score={result.score} isDeepfake={result.is_deepfake} />
+            <ResultCard score={result.score} isDeepfake={result.is_deepfake} verdict={result.status} result={result} />
             <ResultTable result={result} />
-            {result.recommendation && (
+            {(result.rejection_reason || result.recommendation) && (
               <div className="bg-gray-800 rounded-lg p-4">
-                <h4 className="text-gray-300 font-medium mb-1">Recommendation</h4>
-                <p className="text-white">{result.recommendation}</p>
+                <h4 className="text-gray-300 font-medium mb-1">
+                  {result.rejection_reason ? 'Rejection Reason' : 'Recommendation'}
+                </h4>
+                <p className={result.rejection_reason ? 'text-red-400 font-medium' : 'text-white'}>
+                  {result.rejection_reason || result.recommendation}
+                </p>
               </div>
             )}
             <button

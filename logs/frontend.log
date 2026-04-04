@@ -3,10 +3,8 @@
 > vite
 
 
-  VITE v8.0.3  ready in 150 ms
+  VITE v8.0.3  ready in 158 ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose
-10:40:47 AM [vite] (client) hmr update /src/App.jsx, /src/pages/VerifyPage.jsx, /src/pages/RegisterPage.jsx, /src/index.css
-10:40:52 AM [vite] (client) hmr update /src/App.jsx, /src/pages/VerifyPage.jsx, /src/pages/RegisterPage.jsx, /src/index.css
-10:40:59 AM [vite] (client) hmr update /src/App.jsx, /src/pages/VerifyPage.jsx, /src/pages/RegisterPage.jsx, /src/index.css
+12:58:55 PM [vite] (client) hmr update /src/pages/VerifyPage.jsx, /src/index.css

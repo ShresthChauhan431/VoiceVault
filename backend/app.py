@@ -603,18 +603,69 @@ def verify_voice():
         if MOCK_MODE:
             analysis = get_mock_deepfake_analysis()
             cosine_score = 0.92
-            combined_score = cosine_score
+            mock_liveness = analysis['liveness_score']
+            mock_artifact = analysis['artifact_score']
+            mock_fuzzy = True
+            
+            mock_metrics = {
+                'cosine_similarity': cosine_score,
+                'fuzzy_match': mock_fuzzy,
+                'liveness_score': mock_liveness,
+                'artifact_score': mock_artifact,
+                'has_session': False,
+            }
+            
+            # Hard gates apply to mock values too
+            if mock_liveness < 0.15:
+                return jsonify({
+                    'status': 'deepfake_detected',
+                    'score': 0,
+                    'confidence_level': 'REJECTED',
+                    'is_deepfake': True,
+                    **mock_metrics,
+                    'recommendation': 'Voice does not match registered profile or appears synthetic.',
+                    'rejection_reason': 'Liveness gate failed: score below minimum threshold'
+                })
+            if mock_artifact > 0.40:
+                return jsonify({
+                    'status': 'deepfake_detected',
+                    'score': 0,
+                    'confidence_level': 'REJECTED',
+                    'is_deepfake': True,
+                    **mock_metrics,
+                    'recommendation': 'Voice appears to be AI-generated or synthetic.',
+                    'rejection_reason': 'Artifact gate failed: high spectral artifact detected'
+                })
+            
+            # New scoring formula
+            base_score = cosine_score * 100
+            liveness_bonus = mock_liveness * 20
+            artifact_penalty = mock_artifact * 40
+            fuzzy_bonus = 10 if mock_fuzzy else 0
+            final_score = base_score + liveness_bonus - artifact_penalty + fuzzy_bonus
+            final_score = max(0, min(100, final_score))
+            
+            if final_score >= 40:
+                m_status = 'authentic'
+                m_confidence = 'HIGH'
+                m_recommendation = 'Voice verification passed. Identity confirmed.'
+            elif final_score >= 25:
+                m_status = 'uncertain'
+                m_confidence = 'LOW'
+                m_recommendation = 'Verification passed with low confidence. Additional verification recommended.'
+            else:
+                m_status = 'rejected'
+                m_confidence = 'REJECTED'
+                m_recommendation = 'Voice does not match registered profile.'
             
             return jsonify({
-                'status': 'Authentic',
-                'score': int(combined_score * 100),
-                'confidence_level': 'HIGH',
+                'status': m_status,
+                'score': int(final_score),
+                'confidence_level': m_confidence,
                 'is_deepfake': False,
-                'cosine_similarity': cosine_score,
-                'fuzzy_match': True,
-                'liveness_score': analysis['liveness_score'],
-                'artifact_score': analysis['artifact_score'],
-                'recommendation': 'Voice verification passed. Identity confirmed.'
+                **mock_metrics,
+                'recommendation': m_recommendation,
+                'rejection_reason': None
             })
         
         # Real processing with timeout
@@ -662,87 +713,100 @@ def verify_voice():
                 artifact_score = analysis.get('artifact_score', 0.0)
                 logger.info(f'[VERIFY] Liveness: {liveness_score:.4f}, Artifact: {artifact_score:.4f}')
                 
-                # STEP 5: Combined score with calibrated thresholds
-                # Based on ECAPA-TDNN real-world performance with variable recording conditions:
-                #   Same speaker re-recording: 0.35 - 0.60 cosine (can be lower with different mics/rooms)
-                #   Different speaker:         0.15 - 0.35 cosine  
-                #   AI deepfake:               0.40 - 0.65 cosine (often HIGHER than real!)
-                #
-                # Key insight: AI deepfakes often have higher cosine similarity but also higher artifacts
-                
-                if has_session:
-                    # Start with cosine similarity as base
-                    identity_score = cosine_score
-                    
-                    # CRITICAL: Artifact-based deepfake detection
-                    # Real recordings: artifact_score typically < 0.15
-                    # AI deepfakes: artifact_score typically > 0.35
-                    # The penalty must be strong enough to push high-cosine deepfakes below threshold
-                    if artifact_score > 0.30:
-                        # Strong penalty for potential deepfakes
-                        # A deepfake with 0.54 cosine and 0.45 artifact should end up < 0.32
-                        artifact_penalty = (artifact_score - 0.30) * 1.5
-                        identity_score = identity_score - artifact_penalty
-                        logger.info(f'[VERIFY] Applied artifact penalty: {artifact_penalty:.4f}')
-                    
-                    # Combine with fuzzy match as secondary signal
-                    combined = (identity_score * 0.85) + (fuzzy_score * 0.15)
-                    combined = max(0.0, combined)  # Ensure non-negative
-                    
-                    logger.info(f'[VERIFY] Cosine: {cosine_score:.4f}, Artifact: {artifact_score:.4f}, Combined: {combined:.4f}')
-                else:
-                    # Without session: Use Hamming score directly
-                    combined = hamming_score
-                    logger.info(f'[VERIFY] Combined (no session): using hamming_score = {combined:.4f}')
+                # (Scoring moved to after timeout block — STEP 5-8 below)
                 
         except TimeoutError:
             logger.error('[ERROR] /api/verify: AI processing timeout')
             return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
         except ValueError as e:
-            if 'silence' in str(e).lower():
+            if 'silence' in str(e).lower() or 'too short' in str(e).lower():
                 return jsonify({
-                    'error': 'silence_detected',
-                    'message': 'No voice detected in audio'
+                    'error': 'audio_error',
+                    'message': str(e)
                 }), 400
             raise
         
-        # STEP 6: Apply thresholds and determine status
-        # Calibrated for ECAPA-TDNN with variable recording conditions:
-        #   Same speaker (cosine ~0.40, low artifacts): combined ~0.35 → Authentic
-        #   Different speaker (cosine ~0.26): combined ~0.22 → Rejected  
-        #   AI deepfake (cosine ~0.54, high artifacts ~0.45): combined ~0.30 after penalty → Suspicious
-        if combined >= 0.33:
-            status = 'Authentic'
-            confidence_level = 'HIGH'
-            recommendation = 'Voice verification passed. Identity confirmed.'
-        elif combined >= 0.28:
-            status = 'Suspicious'
-            confidence_level = 'MEDIUM'
-            recommendation = 'Voice shows variation or potential synthesis artifacts. Additional verification recommended.'
-        elif combined >= 0.20:
-            status = 'Uncertain'
-            confidence_level = 'LOW'
-            recommendation = 'Unable to confirm identity. Re-record in quieter environment.'
-        else:
-            status = 'Deepfake Detected'
-            confidence_level = 'REJECTED'
-            recommendation = 'Voice does not match registered profile or appears synthetic.'
-        
-        is_deepfake = combined < 0.20
-        
-        # STEP 7: Return full result
-        return jsonify({
-            'status': status,
-            'score': int(combined * 100),
-            'confidence_level': confidence_level,
-            'is_deepfake': bool(is_deepfake),
+        # STEP 5: Hard gates — reject immediately if critical thresholds fail
+        gate_metrics = {
             'cosine_similarity': round(float(cosine_score), 4),
             'fuzzy_match': bool(fuzzy_passed),
             'hamming_score': round(float(hamming_score), 4),
             'liveness_score': round(float(liveness_score), 4),
             'artifact_score': round(float(artifact_score), 4),
             'has_session': bool(has_session),
-            'recommendation': recommendation
+        }
+        
+        if liveness_score < 0.15:
+            logger.warning(f'[VERIFY] HARD GATE: Liveness {liveness_score:.4f} < 0.15 → DEEPFAKE')
+            return jsonify({
+                'status': 'deepfake_detected',
+                'score': 0,
+                'confidence_level': 'REJECTED',
+                'is_deepfake': True,
+                **gate_metrics,
+                'recommendation': 'Voice does not match registered profile or appears synthetic.',
+                'rejection_reason': 'Liveness gate failed: score below minimum threshold'
+            })
+        
+        if artifact_score > 0.40:
+            logger.warning(f'[VERIFY] HARD GATE: Artifact {artifact_score:.4f} > 0.40 → DEEPFAKE')
+            return jsonify({
+                'status': 'deepfake_detected',
+                'score': 0,
+                'confidence_level': 'REJECTED',
+                'is_deepfake': True,
+                **gate_metrics,
+                'recommendation': 'Voice appears to be AI-generated or synthetic.',
+                'rejection_reason': 'Artifact gate failed: high spectral artifact detected'
+            })
+        
+        if has_session and cosine_score < 0.20:
+            logger.warning(f'[VERIFY] HARD GATE: Cosine {cosine_score:.4f} < 0.20 → REJECTED')
+            return jsonify({
+                'status': 'rejected',
+                'score': 0,
+                'confidence_level': 'REJECTED',
+                'is_deepfake': False,
+                **gate_metrics,
+                'recommendation': 'Voice does not match registered profile.',
+                'rejection_reason': 'Speaker mismatch: cosine similarity too low'
+            })
+        
+        # STEP 6: Compute final score using new formula
+        base_score = cosine_score * 100
+        liveness_bonus = liveness_score * 20
+        artifact_penalty = artifact_score * 40
+        fuzzy_bonus = 10 if fuzzy_passed else 0
+        final_score = base_score + liveness_bonus - artifact_penalty + fuzzy_bonus
+        final_score = max(0, min(100, final_score))
+        logger.info(f'[VERIFY] Score: base={base_score:.1f} + liveness_bonus={liveness_bonus:.1f} - artifact_penalty={artifact_penalty:.1f} + fuzzy_bonus={fuzzy_bonus} = {final_score:.1f}')
+        
+        # STEP 7: Verdict thresholds
+        if final_score >= 40:
+            status = 'authentic'
+            confidence_level = 'HIGH'
+            recommendation = 'Voice verification passed. Identity confirmed.'
+        elif final_score >= 25:
+            status = 'uncertain'
+            confidence_level = 'LOW'
+            recommendation = 'Verification passed with low confidence. Additional verification recommended.'
+        else:
+            status = 'rejected'
+            confidence_level = 'REJECTED'
+            recommendation = 'Voice does not match registered profile.'
+        
+        is_deepfake = False  # Gates already filtered true deepfakes
+        display_score = int(final_score)
+        
+        # STEP 8: Return score as percentage for display
+        return jsonify({
+            'status': status,
+            'score': display_score,
+            'confidence_level': confidence_level,
+            'is_deepfake': is_deepfake,
+            **gate_metrics,
+            'recommendation': recommendation,
+            'rejection_reason': None
         })
         
     except Exception as e:
@@ -750,6 +814,81 @@ def verify_voice():
         return jsonify({'error': 'internal_error', 'message': 'Failed to verify audio'}), 500
     finally:
         cleanup_audio(temp_path, audio_bytes)
+
+
+@app.route('/api/debug_similarity', methods=['POST'])
+def debug_similarity():
+    """
+    Debug endpoint to compute raw similarity between two audio files.
+    Input: multipart/form-data with 'audio1' and 'audio2' fields
+    Returns: Raw cosine similarity and embedding statistics
+    """
+    temp_path1 = None
+    temp_path2 = None
+    audio_bytes1 = None
+    audio_bytes2 = None
+    
+    try:
+        if 'audio1' not in request.files or 'audio2' not in request.files:
+            return jsonify({'error': 'missing_audio', 'message': 'Both audio1 and audio2 are required'}), 400
+        
+        audio_file1 = request.files['audio1']
+        audio_file2 = request.files['audio2']
+        
+        # Validate both files
+        is_valid1, error1, audio_bytes1 = validate_audio_file(audio_file1)
+        if not is_valid1:
+            return jsonify({'error': 'invalid_audio1', 'message': error1}), 400
+        
+        is_valid2, error2, audio_bytes2 = validate_audio_file(audio_file2)
+        if not is_valid2:
+            return jsonify({'error': 'invalid_audio2', 'message': error2}), 400
+        
+        # Process both files
+        temp_path1, _ = process_audio_in_memory(audio_bytes1)
+        temp_path2, _ = process_audio_in_memory(audio_bytes2)
+        
+        # Get embeddings
+        emb, _, _ = get_ai_components()
+        embedding1 = emb.get_embedding(temp_path1)
+        embedding2 = emb.get_embedding(temp_path2)
+        
+        # Compute stats
+        emb1_norm = np.linalg.norm(embedding1)
+        emb2_norm = np.linalg.norm(embedding2)
+        emb1_mean = float(np.mean(embedding1))
+        emb2_mean = float(np.mean(embedding2))
+        
+        # Raw dot product
+        raw_dot = float(np.dot(embedding1, embedding2))
+        
+        # Normalized cosine (raw, not mapped)
+        emb1_normalized = embedding1 / (emb1_norm + 1e-8)
+        emb2_normalized = embedding2 / (emb2_norm + 1e-8)
+        raw_cosine = float(np.dot(emb1_normalized, emb2_normalized))
+        
+        # Mapped cosine (what we use for verification)
+        mapped_cosine = emb.cosine_similarity(embedding1, embedding2)
+        
+        result = {
+            'raw_cosine_similarity': round(raw_cosine, 4),
+            'mapped_cosine_similarity': round(mapped_cosine, 4),
+            'embedding1_norm': round(float(emb1_norm), 4),
+            'embedding2_norm': round(float(emb2_norm), 4),
+            'embedding1_mean': round(emb1_mean, 6),
+            'embedding2_mean': round(emb2_mean, 6),
+            'raw_dot_product': round(raw_dot, 4)
+        }
+        
+        print(f"[DEBUG_SIMILARITY] Results: {result}")
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f'[ERROR] /api/debug_similarity: {type(e).__name__}: {e}')
+        return jsonify({'error': 'internal_error', 'message': str(e)}), 500
+    finally:
+        cleanup_audio(temp_path1, audio_bytes1)
+        cleanup_audio(temp_path2, audio_bytes2)
 
 
 @app.route('/api/forensic', methods=['POST'])
