@@ -58,7 +58,7 @@ export default function ZKDemoPage() {
     <div className="min-h-screen bg-gray-950 text-white py-12 px-4">
       <div className="max-w-2xl mx-auto">
         <h1 className="text-3xl font-bold text-center mb-2">Zero-Knowledge Proof Demo</h1>
-        <p className="text-gray-400 text-center mb-8">For Hackathon Judges</p>
+        <p className="text-gray-400 text-center mb-8">to show visually how it works</p>
 
         {/* Section A: Explanation */}
         <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-700 rounded-xl p-6 mb-8">

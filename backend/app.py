@@ -691,8 +691,10 @@ def verify_voice():
                     if session_data['expires'] > time.time():
                         ref_embedding = np.array(session_data['embedding'], dtype=np.float32)
                         cosine_score = emb.cosine_similarity(new_embedding, ref_embedding)
+                        # Apply strictness multiplier to compensate for single-sample enrollment noise
+                        cosine_score = cosine_score * 0.90
                         has_session = True
-                        logger.info(f'[VERIFY] Cosine similarity with session {session_id[:8]}...: {cosine_score:.4f}')
+                        logger.info(f'[VERIFY] Cosine similarity with session {session_id[:8]}... (after 0.90x strictness): {cosine_score:.4f}')
                     else:
                         logger.warning(f'[VERIFY] Session {session_id[:8]}... expired')
                 else:
@@ -760,8 +762,8 @@ def verify_voice():
                 'rejection_reason': 'Artifact gate failed: high spectral artifact detected'
             })
         
-        if has_session and cosine_score < 0.20:
-            logger.warning(f'[VERIFY] HARD GATE: Cosine {cosine_score:.4f} < 0.20 → REJECTED')
+        if has_session and cosine_score < 0.35:
+            logger.warning(f'[VERIFY] HARD GATE: Cosine {cosine_score:.4f} < 0.35 → REJECTED')
             return jsonify({
                 'status': 'rejected',
                 'score': 0,
@@ -770,6 +772,21 @@ def verify_voice():
                 **gate_metrics,
                 'recommendation': 'Voice does not match registered profile.',
                 'rejection_reason': 'Speaker mismatch: cosine similarity too low'
+            })
+        
+        # STEP 5b: Clone detection gate — catches AI clones that pass individual gates
+        # AI clones have HIGH cosine (sound like the person) but LOW liveness and
+        # SUSPICIOUS artifacts. All three conditions must be true simultaneously.
+        if cosine_score > 0.45 and liveness_score < 0.40 and artifact_score > 0.15:
+            logger.warning(f'[VERIFY] CLONE GATE: cosine={cosine_score:.4f}>0.45, liveness={liveness_score:.4f}<0.40, artifact={artifact_score:.4f}>0.15 → DEEPFAKE')
+            return jsonify({
+                'status': 'deepfake_detected',
+                'score': 0,
+                'confidence_level': 'REJECTED',
+                'is_deepfake': True,
+                **gate_metrics,
+                'recommendation': 'Voice appears to be an AI-generated clone.',
+                'rejection_reason': 'High similarity with low liveness detected — suspected AI voice clone'
             })
         
         # STEP 6: Compute final score using new formula

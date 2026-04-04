@@ -7,4 +7,3 @@
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose
-12:58:55 PM [vite] (client) hmr update /src/pages/VerifyPage.jsx, /src/index.css

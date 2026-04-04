@@ -503,16 +503,50 @@ export default function VerifyPage() {
           <div className="space-y-6">
             <ResultCard score={result.score} isDeepfake={result.is_deepfake} verdict={result.status} result={result} />
             <ResultTable result={result} />
-            {(result.rejection_reason || result.recommendation) && (
-              <div className="bg-gray-800 rounded-lg p-4">
-                <h4 className="text-gray-300 font-medium mb-1">
-                  {result.rejection_reason ? 'Rejection Reason' : 'Recommendation'}
-                </h4>
-                <p className={result.rejection_reason ? 'text-red-400 font-medium' : 'text-white'}>
-                  {result.rejection_reason || result.recommendation}
-                </p>
-              </div>
-            )}
+            {(() => {
+              const v = (result.status || '').toLowerCase();
+              let mainText = '';
+              let isWarning = false;
+
+              if (v === 'rejected' || v === 'deepfake_detected') {
+                isWarning = true;
+                if (result.liveness_score < 0.15 && result.artifact_score < 0.25) {
+                  mainText = 'Liveness check failed. Try re-recording in a quieter environment with a better microphone.';
+                } else if (result.artifact_score >= 0.40) {
+                  mainText = 'High spectral artifacts detected. Voice appears AI-generated or synthesized.';
+                } else if (result.artifact_score >= 0.25 && result.artifact_score < 0.40) {
+                  mainText = 'Moderate audio artifacts detected. Voice may be synthetic or a replay attack.';
+                } else if (result.cosine_similarity < 0.20) {
+                  mainText = 'Speaker identity mismatch. This voice does not match the registered profile.';
+                } else if (result.fuzzy_match === false && result.liveness_score >= 0.15) {
+                  mainText = 'Voice pattern did not match enrolled template. Please try again or re-register.';
+                } else {
+                  mainText = 'Voice verification failed. Identity could not be confirmed.';
+                }
+              } else if (v === 'uncertain') {
+                mainText = 'Verification passed with low confidence. Consider re-recording for a stronger match.';
+              } else if (v === 'authentic') {
+                mainText = 'Voice verification passed. Identity confirmed.';
+              } else {
+                mainText = result.recommendation || '';
+              }
+
+              return mainText ? (
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <h4 className="text-gray-300 font-medium mb-1">
+                    {isWarning ? 'Why This Failed' : 'Recommendation'}
+                  </h4>
+                  <p className={isWarning ? 'text-red-400 font-medium' : 'text-white'}>
+                    {mainText}
+                  </p>
+                  {result.rejection_reason && (
+                    <p className="text-gray-400 text-sm mt-2">
+                      Gate: {result.rejection_reason}
+                    </p>
+                  )}
+                </div>
+              ) : null;
+            })()}
             <button
               onClick={reset}
               className="w-full bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-6 py-3 transition-colors"
