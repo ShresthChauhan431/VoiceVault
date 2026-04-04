@@ -32,11 +32,10 @@ function TabButton({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className={`px-6 py-3 font-medium transition-colors ${
-        active
+      className={`px-6 py-3 font-medium transition-colors ${active
           ? 'text-white border-b-2 border-blue-500'
           : 'text-gray-400 hover:text-gray-200'
-      }`}
+        }`}
     >
       {children}
     </button>
@@ -47,11 +46,10 @@ function SubTabButton({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-        active
+      className={`px-4 py-2 text-sm rounded-lg transition-colors ${active
           ? 'bg-gray-700 text-white'
           : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-      }`}
+        }`}
     >
       {children}
     </button>
@@ -123,7 +121,7 @@ function ResultCard({ score, isDeepfake, verdict, result }) {
   }
 
   return (
-    <div 
+    <div
       className="text-center p-8 rounded-xl border-2 animate-fadeIn"
       style={{ borderColor: color, backgroundColor: `${color}15` }}
     >
@@ -276,7 +274,7 @@ function ForensicReport({ report }) {
           <div>
             <h4 className="text-yellow-500 font-medium mb-1">Legal Disclaimer</h4>
             <p className="text-yellow-200/80 text-sm">
-              This report is for investigative purposes only. It is not admissible as standalone legal evidence. 
+              This report is for investigative purposes only. It is not admissible as standalone legal evidence.
               Consult a certified forensic audio expert for legal proceedings.
             </p>
           </div>
@@ -353,17 +351,17 @@ export default function VerifyPage() {
     try {
       const provider = getProvider();
       const contract = getVoiceVaultContract(provider);
-      
+
       // getVoiceProfile returns: (helperString, commitment, salt, registeredAt, isActive)
       const profile = await contract.getVoiceProfile(addr);
-      
+
       // Destructure the tuple return
       const [helperString, commitment, salt, registeredAt, isActive] = profile;
 
       if (isActive) {
         const registeredDate = new Date(Number(registeredAt) * 1000).toLocaleDateString();
         setProfileStatus(`Profile found. Registered on ${registeredDate}.`);
-        
+
         // helperString is bytes, commitment and salt are bytes32
         // Convert to proper format for verification API
         setProfileData({
@@ -503,50 +501,16 @@ export default function VerifyPage() {
           <div className="space-y-6">
             <ResultCard score={result.score} isDeepfake={result.is_deepfake} verdict={result.status} result={result} />
             <ResultTable result={result} />
-            {(() => {
-              const v = (result.status || '').toLowerCase();
-              let mainText = '';
-              let isWarning = false;
-
-              if (v === 'rejected' || v === 'deepfake_detected') {
-                isWarning = true;
-                if (result.liveness_score < 0.15 && result.artifact_score < 0.25) {
-                  mainText = 'Liveness check failed. Try re-recording in a quieter environment with a better microphone.';
-                } else if (result.artifact_score >= 0.40) {
-                  mainText = 'High spectral artifacts detected. Voice appears AI-generated or synthesized.';
-                } else if (result.artifact_score >= 0.25 && result.artifact_score < 0.40) {
-                  mainText = 'Moderate audio artifacts detected. Voice may be synthetic or a replay attack.';
-                } else if (result.cosine_similarity < 0.20) {
-                  mainText = 'Speaker identity mismatch. This voice does not match the registered profile.';
-                } else if (result.fuzzy_match === false && result.liveness_score >= 0.15) {
-                  mainText = 'Voice pattern did not match enrolled template. Please try again or re-register.';
-                } else {
-                  mainText = 'Voice verification failed. Identity could not be confirmed.';
-                }
-              } else if (v === 'uncertain') {
-                mainText = 'Verification passed with low confidence. Consider re-recording for a stronger match.';
-              } else if (v === 'authentic') {
-                mainText = 'Voice verification passed. Identity confirmed.';
-              } else {
-                mainText = result.recommendation || '';
-              }
-
-              return mainText ? (
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <h4 className="text-gray-300 font-medium mb-1">
-                    {isWarning ? 'Why This Failed' : 'Recommendation'}
-                  </h4>
-                  <p className={isWarning ? 'text-red-400 font-medium' : 'text-white'}>
-                    {mainText}
-                  </p>
-                  {result.rejection_reason && (
-                    <p className="text-gray-400 text-sm mt-2">
-                      Gate: {result.rejection_reason}
-                    </p>
-                  )}
-                </div>
-              ) : null;
-            })()}
+            {(result.rejection_reason || result.recommendation) && (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h4 className="text-gray-300 font-medium mb-1">
+                  {result.rejection_reason ? 'Rejection Reason' : 'Recommendation'}
+                </h4>
+                <p className={result.rejection_reason ? 'text-red-400 font-medium' : 'text-white'}>
+                  {result.rejection_reason || result.recommendation}
+                </p>
+              </div>
+            )}
             <button
               onClick={reset}
               className="w-full bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-6 py-3 transition-colors"
@@ -569,7 +533,7 @@ export default function VerifyPage() {
             {/* Section A: Target Address */}
             <div>
               <h2 className="text-lg font-semibold mb-4">Target Address</h2>
-              
+
               {isConnected && (
                 <label className="flex items-center gap-2 mb-3 cursor-pointer">
                   <input
@@ -612,7 +576,7 @@ export default function VerifyPage() {
             {/* Section B: Audio Input */}
             <div>
               <h2 className="text-lg font-semibold mb-4">Audio Sample</h2>
-              
+
               <div className="flex gap-2 mb-4">
                 <SubTabButton active={audioInputMode === 'record'} onClick={() => setAudioInputMode('record')}>
                   Record Live

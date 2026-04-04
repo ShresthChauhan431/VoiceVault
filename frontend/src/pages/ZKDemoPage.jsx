@@ -166,7 +166,7 @@ export default function ZKDemoPage() {
               Full ZK-SNARK implementation uses <strong className="text-white">Circom + SnarkJS</strong>.
             </p>
             <p>
-              In a production build, proofs are generated <strong className="text-white">locally on-device</strong>. 
+              In a production build, proofs are generated <strong className="text-white">locally on-device</strong>.
               The server only receives the proof — never the audio or the embedding.
             </p>
 

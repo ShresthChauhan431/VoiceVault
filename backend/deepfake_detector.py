@@ -322,108 +322,9 @@ class DeepfakeDetector:
             'spectral_flatness_std': float(flatness_std)
         }
     
-    def _detect_codec_artifacts(self, audio: np.ndarray, sr: int) -> bool:
-        """
-        Detect if audio has typical browser codec compression signatures.
-        Browser mic recordings (opus/webm) show:
-        - High-frequency rolloff above ~16kHz
-        - Relatively uniform noise floor
-        
-        Args:
-            audio: Audio signal
-            sr: Sample rate
-            
-        Returns:
-            True if codec compression artifacts are detected
-        """
-        # Compute spectrogram
-        S = np.abs(librosa.stft(audio, n_fft=2048, hop_length=512))
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
-        
-        # Check for high-frequency rolloff above 16kHz
-        # Browser codecs (opus) typically cut off around 16-20kHz
-        high_freq_mask = freqs > 16000
-        low_freq_mask = (freqs > 1000) & (freqs <= 8000)
-        
-        if not np.any(high_freq_mask) or not np.any(low_freq_mask):
-            return False
-        
-        high_energy = np.mean(S[high_freq_mask, :])
-        low_energy = np.mean(S[low_freq_mask, :])
-        
-        # If high-freq energy is very low compared to low-freq, codec rolloff detected
-        if low_energy > 0:
-            rolloff_ratio = high_energy / (low_energy + 1e-10)
-            has_rolloff = rolloff_ratio < 0.05  # Strong high-freq rolloff
-        else:
-            has_rolloff = False
-        
-        # Check for uniform noise floor (codec quantization noise)
-        # Compute noise floor variance across time in low-energy frequency bands
-        noise_band = S[(freqs > 8000) & (freqs <= 16000), :]
-        if noise_band.size > 0:
-            noise_variance = np.std(np.mean(noise_band, axis=0))
-            uniform_noise = noise_variance < 0.01  # Very uniform = codec compression
-        else:
-            uniform_noise = False
-        
-        return has_rolloff or uniform_noise
-    
-    def _check_human_speech_characteristics(self, audio: np.ndarray, sr: int) -> bool:
-        """
-        Check if audio has basic human speech characteristics:
-        - Natural pitch variation (> 20Hz range)
-        - Breath pauses / silence gaps
-        - Dynamic volume range (> 10dB)
-        
-        Args:
-            audio: Audio signal
-            sr: Sample rate
-            
-        Returns:
-            True if audio passes basic human speech checks
-        """
-        # 1. Check pitch variance > 20Hz
-        f0 = self._compute_f0(audio, sr)
-        if len(f0) < 3:
-            return False
-        pitch_range = np.max(f0) - np.min(f0)
-        has_pitch_variance = pitch_range > 20.0
-        
-        # 2. Check for silence gaps (breath pauses)
-        # Compute RMS energy in short frames
-        frame_length = int(0.025 * sr)
-        hop_length = int(0.010 * sr)
-        rms = librosa.feature.rms(y=audio, frame_length=frame_length, hop_length=hop_length)[0]
-        
-        if len(rms) == 0:
-            return False
-        
-        # A silence gap is a frame with energy < 10% of peak energy
-        peak_energy = np.max(rms)
-        if peak_energy == 0:
-            return False
-        silence_threshold = 0.10 * peak_energy
-        silence_frames = np.sum(rms < silence_threshold)
-        total_frames = len(rms)
-        has_silence_gaps = (silence_frames / total_frames) > 0.05  # At least 5% silence
-        
-        # 3. Check dynamic volume range > 10dB
-        # Use RMS values ignoring complete silence
-        rms_voiced = rms[rms > 0.01 * peak_energy]
-        if len(rms_voiced) < 2:
-            return False
-        db_range = 20 * np.log10(np.max(rms_voiced) / (np.min(rms_voiced) + 1e-10))
-        has_dynamics = db_range > 10.0
-        
-        return has_pitch_variance and has_silence_gaps and has_dynamics
-    
     def full_analysis(self, file_path: str) -> Dict[str, Any]:
         """
         Run complete deepfake analysis combining all checks.
-        
-        Includes codec artifact tolerance for browser mic recordings
-        and a minimum liveness floor for audio with human speech characteristics.
         
         Args:
             file_path: Path to audio file
@@ -443,24 +344,23 @@ class DeepfakeDetector:
         liveness_score = liveness_result['liveness_score']
         artifact_score = spectral_result['artifact_score']
         
-        # Load audio once for codec/speech checks
-        audio, sr = librosa.load(file_path, sr=16000, mono=True)
+        # Guaranteed floor — browser mic opus/webm compression
+        # causes artificially low jitter/shimmer scores
+        # Floor only applies when spectral artifacts are low
+        # meaning it is likely a real compressed recording
+        try:
+            spectral_check = spectral_result.get('artifact_score', 1.0)
+            if liveness_score < 0.30 and spectral_check < 0.25:
+                liveness_score = 0.30
+        except Exception:
+            if liveness_score < 0.30:
+                liveness_score = 0.30
         
-        # Codec artifact tolerance: browser mic recordings (opus/webm) introduce
-        # compression artifacts that the liveness detector misreads as synthetic.
-        # Apply +0.25 bonus ONLY when artifact_score is low (< 0.25), meaning
-        # it's likely a real compressed recording, not a synthetic voice.
-        codec_bonus_applied = False
-        if self._detect_codec_artifacts(audio, sr) and artifact_score < 0.25:
-            liveness_score = min(1.0, liveness_score + 0.25)
-            codec_bonus_applied = True
-        
-        # Minimum liveness floor: if audio passes basic human speech checks
-        # (pitch variance > 20Hz, silence gaps, dynamics > 10dB), enforce
-        # a minimum liveness of 0.20 to prevent real speech from scoring 0%.
-        human_speech_detected = self._check_human_speech_characteristics(audio, sr)
-        if human_speech_detected and liveness_score < 0.20:
-            liveness_score = 0.20
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[LIVENESS] raw={liveness_result['liveness_score']:.3f} "
+                    f"artifact={spectral_check:.3f} "
+                    f"final={liveness_score:.3f}")
         
         # Combine scores: deepfake_probability = (1 - liveness_score)*0.6 + artifact_score*0.4
         deepfake_probability = (1 - liveness_score) * 0.6 + artifact_score * 0.4
@@ -480,9 +380,7 @@ class DeepfakeDetector:
                 'hnr': liveness_result['hnr'],
                 'mfcc_delta_cv': spectral_result.get('mfcc_delta_cv', 0),
                 'spectral_flatness_std': spectral_result.get('spectral_flatness_std', 0),
-                'spectral_suspicious': spectral_result['suspicious'],
-                'codec_bonus_applied': codec_bonus_applied,
-                'human_speech_detected': human_speech_detected
+                'spectral_suspicious': spectral_result['suspicious']
             }
         }
 

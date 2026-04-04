@@ -249,3 +249,4 @@ class VoiceEmbedder:
 def get_embedder() -> VoiceEmbedder:
     """Get the singleton VoiceEmbedder instance."""
     return VoiceEmbedder()
+    return VoiceEmbedder()
