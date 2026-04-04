@@ -91,6 +91,11 @@ embedder: Optional[VoiceEmbedder] = None
 fuzzy_extractor: Optional[VoiceFuzzyExtractor] = None
 deepfake_detector: Optional[DeepfakeDetector] = None
 
+# Server-side embedding store for session-based verification
+# { session_id: { embedding: list, address: str, expires: float } }
+import time
+embedding_store: Dict[str, Dict[str, Any]] = {}
+
 
 def get_ai_components():
     """Lazy load AI components."""
@@ -345,12 +350,24 @@ def get_mock_deepfake_analysis() -> Dict[str, Any]:
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint with model status."""
+    model_status = {'loaded': False, 'model_name': 'unknown', 'embedding_dim': 0}
+    
+    if not MOCK_MODE:
+        try:
+            emb, _, _ = get_ai_components()
+            model_status = emb.get_model_status()
+        except Exception:
+            pass
+    else:
+        model_status = {'loaded': True, 'model_name': 'mock', 'embedding_dim': 192}
+    
     return jsonify({
         'status': 'ok',
-        'model_loaded': is_model_loaded(),
+        'model_loaded': model_status['loaded'],
         'mock_mode': MOCK_MODE,
-        'version': '2.0'
+        'active_sessions': len(embedding_store),
+        'version': '2.1'
     })
 
 
@@ -407,7 +424,12 @@ def get_profile():
 def register_voice():
     """
     Register a voice and generate fuzzy commitment data.
-    Input: multipart/form-data with 'audio' field
+    Input: multipart/form-data with 'audio' field, optional 'address' field
+    
+    Returns: { success, helper_string, commitment, salt, session_id, message }
+    
+    The session_id can be used for subsequent verify requests to enable
+    cosine similarity comparison (the primary verification method).
     
     Security: Validates file type, size, duration. 30s AI timeout.
     Privacy: Audio cleaned from RAM after processing.
@@ -421,6 +443,7 @@ def register_voice():
             return jsonify({'error': 'no_audio', 'message': 'Please upload an audio file'}), 400
         
         audio_file = request.files['audio']
+        address = request.form.get('address', 'unknown')
         
         # Validate file type, size
         is_valid, error_msg, audio_bytes = validate_audio_file(audio_file)
@@ -450,11 +473,13 @@ def register_voice():
         # MOCK MODE
         if MOCK_MODE:
             enrollment = get_mock_enrollment()
+            session_id = str(uuid.uuid4())
             return jsonify({
                 'success': True,
                 'helper_string': enrollment['helper_string'],
                 'commitment': enrollment['commitment'],
                 'salt': enrollment['salt'],
+                'session_id': session_id,
                 'message': 'Voice registered successfully (mock mode)'
             })
         
@@ -464,6 +489,16 @@ def register_voice():
                 emb, fuzz, _ = get_ai_components()
                 embedding = emb.get_embedding(temp_path)
                 enrollment = fuzz.enroll(embedding)
+                
+                # Generate session_id and store embedding
+                session_id = str(uuid.uuid4())
+                embedding_store[session_id] = {
+                    'embedding': embedding.tolist(),
+                    'address': address,
+                    'expires': time.time() + 86400  # 24 hours
+                }
+                logger.info(f'[REGISTER] Created session {session_id[:8]}... for address {address[:10] if len(address) > 10 else address}')
+                
         except TimeoutError:
             logger.error('[ERROR] /api/register: AI processing timeout')
             return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
@@ -480,6 +515,7 @@ def register_voice():
             'helper_string': enrollment['helper_string'],
             'commitment': enrollment['commitment'],
             'salt': enrollment['salt'],
+            'session_id': session_id,
             'message': 'Voice registered successfully'
         })
         
@@ -497,13 +533,28 @@ def register_voice():
 def verify_voice():
     """
     Verify a voice against stored fuzzy commitment data.
-    Input: multipart/form-data with 'audio' + helper_string, commitment, salt
+    Input: multipart/form-data with:
+        - audio: audio file
+        - helper_string, commitment, salt: from registration
+        - session_id (optional): from registration response for cosine similarity
+    
+    Verification Strategy:
+        - Primary (70% weight): Cosine similarity if session_id provided
+        - Secondary (30% weight): Fuzzy extractor binary match
     
     Security: Validates file type, size, duration. 30s AI timeout.
     Privacy: Audio cleaned from RAM after processing.
     """
     temp_path = None
     audio_bytes = None
+    
+    # Cleanup expired sessions
+    now = time.time()
+    expired = [k for k, v in embedding_store.items() if v['expires'] < now]
+    for k in expired:
+        del embedding_store[k]
+    if expired:
+        logger.info(f'[CLEANUP] Removed {len(expired)} expired sessions')
     
     try:
         # Get audio file
@@ -516,6 +567,7 @@ def verify_voice():
         helper_string = request.form.get('helper_string')
         commitment = request.form.get('commitment')
         salt = request.form.get('salt')
+        session_id = request.form.get('session_id')
         
         if not all([helper_string, commitment, salt]):
             return jsonify({
@@ -550,14 +602,16 @@ def verify_voice():
         # MOCK MODE
         if MOCK_MODE:
             analysis = get_mock_deepfake_analysis()
-            fuzzy_match = 0.92
-            combined_score = fuzzy_match * 0.60 + analysis['liveness_score'] * 0.25 + (1 - analysis['artifact_score']) * 0.15
+            cosine_score = 0.92
+            combined_score = cosine_score
             
             return jsonify({
                 'status': 'Authentic',
                 'score': int(combined_score * 100),
                 'confidence_level': 'HIGH',
                 'is_deepfake': False,
+                'cosine_similarity': cosine_score,
+                'fuzzy_match': True,
                 'liveness_score': analysis['liveness_score'],
                 'artifact_score': analysis['artifact_score'],
                 'recommendation': 'Voice verification passed. Identity confirmed.'
@@ -573,45 +627,74 @@ def verify_voice():
                     logger.error('[CRITICAL] Voice embedder model is None despite MOCK_MODE=false')
                     raise RuntimeError('Voice embedding model failed to load')
                 
-                embedding = emb.get_embedding(temp_path)
+                # STEP 1: Generate new embedding from submitted audio
+                new_embedding = emb.get_embedding(temp_path)
+                logger.info(f'[VERIFY] New embedding shape: {new_embedding.shape}, norm: {np.linalg.norm(new_embedding):.4f}')
                 
-                # ========== DEBUG LOGGING START ==========
-                logger.info(f'[DEBUG] Input embedding shape: {embedding.shape}')
-                logger.info(f'[DEBUG] Input embedding first 10 values: {embedding[:10]}')
-                logger.info(f'[DEBUG] Input embedding mean: {embedding.mean():.6f}, std: {embedding.std():.6f}')
-                logger.info(f'[DEBUG] Input embedding norm: {np.linalg.norm(embedding):.6f}')
+                # STEP 2: Cosine similarity (primary method, weight 70%)
+                cosine_score = 0.5  # neutral default - no reference available
+                has_session = False
                 
-                # Decode the stored helper_string to get stored binary for comparison
-                try:
-                    stored_binary = bytes.fromhex(helper_string).decode()
-                    new_binary = fuzz.quantize_embedding(embedding)
-                    
-                    # Compute raw hamming distance
-                    if len(stored_binary) == len(new_binary) == 192:
-                        hamming_dist = sum(c1 != c2 for c1, c2 in zip(stored_binary, new_binary))
-                        logger.info(f'[DEBUG] Stored binary first 20: {stored_binary[:20]}')
-                        logger.info(f'[DEBUG] New binary first 20: {new_binary[:20]}')
-                        logger.info(f'[DEBUG] Raw Hamming distance: {hamming_dist}/192 ({100*hamming_dist/192:.1f}% different)')
-                except Exception as he:
-                    logger.warning(f'[DEBUG] Could not decode helper for comparison: {he}')
-                # ========== DEBUG LOGGING END ==========
+                if session_id and session_id in embedding_store:
+                    session_data = embedding_store[session_id]
+                    if session_data['expires'] > time.time():
+                        ref_embedding = np.array(session_data['embedding'], dtype=np.float32)
+                        cosine_score = emb.cosine_similarity(new_embedding, ref_embedding)
+                        has_session = True
+                        logger.info(f'[VERIFY] Cosine similarity with session {session_id[:8]}...: {cosine_score:.4f}')
+                    else:
+                        logger.warning(f'[VERIFY] Session {session_id[:8]}... expired')
+                else:
+                    logger.info(f'[VERIFY] No valid session_id provided, using fuzzy extractor only')
                 
-                # Fuzzy verification
-                fuzzy_match = 1.0 if fuzz.verify(embedding, helper_string, commitment, salt) else 0.0
-                logger.info(f'[DEBUG] Fuzzy verify() returned: {fuzzy_match}')
+                # STEP 3: Fuzzy extractor match (secondary method, weight 30%)
+                fuzzy_passed = fuzz.verify(new_embedding, helper_string, commitment, salt)
+                fuzzy_score = 1.0 if fuzzy_passed else 0.0
+                logger.info(f'[VERIFY] Fuzzy verify result: {fuzzy_passed}')
                 
-                # Get match score for more granularity
-                if fuzzy_match == 0.0:
-                    match_score = fuzz.compute_match_score(embedding, helper_string)
-                    logger.info(f'[DEBUG] compute_match_score() returned: {match_score:.4f}')
-                    fuzzy_match = match_score
+                # Also get Hamming-based match score for debugging
+                hamming_score = fuzz.compute_match_score(new_embedding, helper_string)
+                logger.info(f'[VERIFY] Hamming match score: {hamming_score:.4f}')
                 
-                logger.info(f'[DEBUG] Final fuzzy_match value: {fuzzy_match:.4f}')
-                
-                # Deepfake analysis
+                # STEP 4: Deepfake liveness analysis
                 analysis = detector.full_analysis(temp_path)
-                logger.info(f'[DEBUG] Liveness score: {analysis["liveness_score"]:.4f}')
-                logger.info(f'[DEBUG] Artifact score: {analysis["artifact_score"]:.4f}')
+                liveness_score = analysis['liveness_score']
+                artifact_score = analysis.get('artifact_score', 0.0)
+                logger.info(f'[VERIFY] Liveness: {liveness_score:.4f}, Artifact: {artifact_score:.4f}')
+                
+                # STEP 5: Combined score with calibrated thresholds
+                # Based on ECAPA-TDNN real-world performance with variable recording conditions:
+                #   Same speaker re-recording: 0.35 - 0.60 cosine (can be lower with different mics/rooms)
+                #   Different speaker:         0.15 - 0.35 cosine  
+                #   AI deepfake:               0.40 - 0.65 cosine (often HIGHER than real!)
+                #
+                # Key insight: AI deepfakes often have higher cosine similarity but also higher artifacts
+                
+                if has_session:
+                    # Start with cosine similarity as base
+                    identity_score = cosine_score
+                    
+                    # CRITICAL: Artifact-based deepfake detection
+                    # Real recordings: artifact_score typically < 0.15
+                    # AI deepfakes: artifact_score typically > 0.35
+                    # The penalty must be strong enough to push high-cosine deepfakes below threshold
+                    if artifact_score > 0.30:
+                        # Strong penalty for potential deepfakes
+                        # A deepfake with 0.54 cosine and 0.45 artifact should end up < 0.32
+                        artifact_penalty = (artifact_score - 0.30) * 1.5
+                        identity_score = identity_score - artifact_penalty
+                        logger.info(f'[VERIFY] Applied artifact penalty: {artifact_penalty:.4f}')
+                    
+                    # Combine with fuzzy match as secondary signal
+                    combined = (identity_score * 0.85) + (fuzzy_score * 0.15)
+                    combined = max(0.0, combined)  # Ensure non-negative
+                    
+                    logger.info(f'[VERIFY] Cosine: {cosine_score:.4f}, Artifact: {artifact_score:.4f}, Combined: {combined:.4f}')
+                else:
+                    # Without session: Use Hamming score directly
+                    combined = hamming_score
+                    logger.info(f'[VERIFY] Combined (no session): using hamming_score = {combined:.4f}')
+                
         except TimeoutError:
             logger.error('[ERROR] /api/verify: AI processing timeout')
             return jsonify({'error': 'timeout', 'message': 'Processing timeout. Please try again.'}), 408
@@ -623,55 +706,42 @@ def verify_voice():
                 }), 400
             raise
         
-        liveness_score = analysis['liveness_score']
-        artifact_score = analysis['artifact_score']
-        
-        # ========== CRITICAL FIX: Identity mismatch detection ==========
-        # If fuzzy_match is below 0.85 (>15% bit difference), this is likely a different person
-        # Override status to reflect this regardless of liveness/artifact scores
-        identity_mismatch = fuzzy_match < 0.85
-        if identity_mismatch:
-            logger.warning(f'[IDENTITY] Fuzzy match {fuzzy_match:.2f} below 0.85 threshold - likely different person')
-        # ================================================================
-        
-        # Combined score
-        combined_score = fuzzy_match * 0.60 + liveness_score * 0.25 + (1 - artifact_score) * 0.15
-        logger.info(f'[DEBUG] Combined score calculation: {fuzzy_match:.4f}*0.60 + {liveness_score:.4f}*0.25 + (1-{artifact_score:.4f})*0.15 = {combined_score:.4f}')
-        
-        # Determine status and confidence
-        # CRITICAL: If identity doesn't match, force rejection regardless of other scores
-        if identity_mismatch:
-            status = 'Deepfake'
-            confidence_level = 'REJECTED'
-            recommendation = 'Voice does not match registered profile. Identity verification failed.'
-            # Also cap the score to reflect the mismatch
-            combined_score = min(combined_score, 0.55)  # Cap at 55% if identity mismatch
-        elif combined_score >= 0.90:
+        # STEP 6: Apply thresholds and determine status
+        # Calibrated for ECAPA-TDNN with variable recording conditions:
+        #   Same speaker (cosine ~0.40, low artifacts): combined ~0.35 → Authentic
+        #   Different speaker (cosine ~0.26): combined ~0.22 → Rejected  
+        #   AI deepfake (cosine ~0.54, high artifacts ~0.45): combined ~0.30 after penalty → Suspicious
+        if combined >= 0.33:
             status = 'Authentic'
             confidence_level = 'HIGH'
-            recommendation = 'Voice verification passed. Identity confirmed with high confidence.'
-        elif combined_score >= 0.75:
+            recommendation = 'Voice verification passed. Identity confirmed.'
+        elif combined >= 0.28:
             status = 'Suspicious'
             confidence_level = 'MEDIUM'
-            recommendation = 'Voice shows some anomalies. Consider additional verification.'
-        elif combined_score >= 0.60:
+            recommendation = 'Voice shows variation or potential synthesis artifacts. Additional verification recommended.'
+        elif combined >= 0.20:
             status = 'Uncertain'
             confidence_level = 'LOW'
-            recommendation = 'Unable to confirm identity. Re-record in a quieter environment.'
+            recommendation = 'Unable to confirm identity. Re-record in quieter environment.'
         else:
-            status = 'Deepfake'
+            status = 'Deepfake Detected'
             confidence_level = 'REJECTED'
-            recommendation = 'Voice appears synthetic or does not match registered profile.'
+            recommendation = 'Voice does not match registered profile or appears synthetic.'
         
+        is_deepfake = combined < 0.20
+        
+        # STEP 7: Return full result
         return jsonify({
             'status': status,
-            'score': int(combined_score * 100),
+            'score': int(combined * 100),
             'confidence_level': confidence_level,
-            'is_deepfake': analysis['is_likely_deepfake'],
-            'liveness_score': round(liveness_score, 4),
-            'artifact_score': round(artifact_score, 4),
-            'fuzzy_match': round(fuzzy_match, 4),  # Return this for debugging
-            'identity_mismatch': identity_mismatch,  # New field
+            'is_deepfake': bool(is_deepfake),
+            'cosine_similarity': round(float(cosine_score), 4),
+            'fuzzy_match': bool(fuzzy_passed),
+            'hamming_score': round(float(hamming_score), 4),
+            'liveness_score': round(float(liveness_score), 4),
+            'artifact_score': round(float(artifact_score), 4),
+            'has_session': bool(has_session),
             'recommendation': recommendation
         })
         

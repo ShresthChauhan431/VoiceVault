@@ -1,0 +1,318 @@
+[INFO] Applied quirks (see `speechbrain.utils.quirks`): [disable_jit_profiling, allow_tf32]
+[INFO] Excluded quirks specified by the `SB_DISABLE_QUIRKS` environment (comma-separated list): []
+[INFO] Fetch hyperparams.yaml: Using symlink found at '/Users/shresthchauhan/Documents/Projects/Hachathon/hacksagon/VoiceVault/backend/backend/models/spkrec-ecapa-voxceleb/hyperparams.yaml'
+[INFO] Fetch embedding_model.ckpt: Using symlink found at '/Users/shresthchauhan/Documents/Projects/Hachathon/hacksagon/VoiceVault/backend/backend/models/spkrec-ecapa-voxceleb/embedding_model.ckpt'
+[INFO] Fetch mean_var_norm_emb.ckpt: Using symlink found at '/Users/shresthchauhan/Documents/Projects/Hachathon/hacksagon/VoiceVault/backend/backend/models/spkrec-ecapa-voxceleb/mean_var_norm_emb.ckpt'
+[INFO] Fetch classifier.ckpt: Using symlink found at '/Users/shresthchauhan/Documents/Projects/Hachathon/hacksagon/VoiceVault/backend/backend/models/spkrec-ecapa-voxceleb/classifier.ckpt'
+[INFO] Fetch label_encoder.txt: Using symlink found at '/Users/shresthchauhan/Documents/Projects/Hachathon/hacksagon/VoiceVault/backend/backend/models/spkrec-ecapa-voxceleb/label_encoder.ckpt'
+[INFO] Loading pretrained files for: embedding_model, mean_var_norm_emb, classifier, label_encoder
+
+╔══════════════════════════════════════════════════════════════════╗
+║                     VoiceVault API Server                        ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Port: 5001                                                     ║
+║  Mock Mode: False                                               ║
+║  Version: 2.0                                                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Test commands:
+
+# Health check
+curl http://localhost:5001/api/health
+
+# Register voice
+curl -X POST http://localhost:5001/api/register \
+  -F "audio=@test.wav"
+
+# Verify voice
+curl -X POST http://localhost:5001/api/verify \
+  -F "audio=@test.wav" \
+  -F "helper_string=<helper>" \
+  -F "commitment=<commitment>" \
+  -F "salt=<salt>"
+
+# Forensic analysis
+curl -X POST http://localhost:5001/api/forensic \
+  -F "audio=@test.wav" \
+  -F "target_helper=<helper>" \
+  -F "target_commitment=<commitment>" \
+  -F "target_salt=<salt>"
+
+# Detect clone
+curl -X POST http://localhost:5001/api/detect_clone \
+  -F "audio=@test.wav" \
+  -F 'registered_profiles=[{"address":"0x123","helper_string":"...","commitment":"...","salt":"..."}]'
+
+# Challenge response
+curl -X POST http://localhost:5001/api/challenge \
+  -F "audio=@test.wav" \
+  -F "challenge_text=verify my identity now"
+
+
+
+⏳ Loading AI models (this may take 30-60 seconds on first run)...
+✅ AI models loaded successfully!
+   - Embedder model: True
+ * Serving Flask app 'app'
+ * Debug mode: on
+[INFO] [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.55.124:5001
+[INFO] [33mPress CTRL+C to quit[0m
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:11] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:12] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:13] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:14] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:15] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:16] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:18] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:19] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:20] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:21] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:22] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:23] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:24] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:25] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:26] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:27] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:28] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:29] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:30] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:30] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:31] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:33] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:34] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:35] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:36] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:37] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:38] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:39] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:40] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:41] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:42] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:43] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:44] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:45] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:46] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:48] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:49] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:50] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:51] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:52] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:53] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:54] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:55] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:56] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:57] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:58] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:15:59] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:00] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:00] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:01] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:02] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:03] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:05] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:06] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:07] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:08] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:09] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:10] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:11] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:12] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:13] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:14] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:15] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:16] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:18] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:19] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:20] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:21] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:22] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:23] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:24] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:25] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:26] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:27] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:28] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:29] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:30] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:30] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:31] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:32] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:33] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:34] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:35] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:36] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:38] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:39] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:40] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:41] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:42] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:43] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:44] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:45] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:46] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:48] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:49] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:50] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:51] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:52] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:53] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:54] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:55] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:56] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:57] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:58] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:16:59] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:00] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:00] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:01] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:02] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:03] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:04] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:05] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:06] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:07] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:08] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:09] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:11] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:12] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:13] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] [DEBUG] Input embedding shape: (192,)
+[INFO] [DEBUG] Input embedding first 10 values: [-0.04675645  0.01560454 -0.03139941  0.06083067  0.0764477  -0.07537444
+ -0.04334878  0.0466596  -0.09696405 -0.0191256 ]
+[INFO] [DEBUG] Input embedding mean: 0.002735, std: 0.072117
+[INFO] [DEBUG] Input embedding norm: 1.000000
+[INFO] [DEBUG] helper_string (first 100 chars): 0x30313031303030313030313130303030313030313030313031303130303030313030313131303130313031313130303031
+[INFO] [DEBUG] commitment (first 100 chars): 0x8603b7c281c70ec8e1508347478605b6901d35bf58f9119436d3b23c0aa7cc8e
+[INFO] [DEBUG] salt (first 100 chars): 0x5453b4f29f31ffdcadbcf589341de5d11fa669a6fe5786bae975b348dfc06bbe
+[INFO] [DEBUG] Stored binary first 20: 01010001001100001001
+[INFO] [DEBUG] New binary first 20: 01011001001110011011
+[INFO] [DEBUG] Raw Hamming distance: 51/192 (26.6% different)
+[INFO] [DEBUG] Fuzzy verify() returned: 0.0
+[INFO] [DEBUG] compute_match_score() returned: 0.7344
+[INFO] [DEBUG] Final fuzzy_match value: 0.7344
+[INFO] [DEBUG] Liveness score: 0.0000
+[INFO] [DEBUG] Artifact score: 0.4045
+[WARNING] [IDENTITY] Fuzzy match 0.73 below 0.85 threshold - likely different person
+[INFO] [DEBUG] Combined score calculation: 0.7344*0.60 + 0.0000*0.25 + (1-0.4045)*0.15 = 0.5299
+[INFO] [PRIVACY] Audio buffer cleared from RAM
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:17:52] "POST /api/verify HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:18:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:18:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] [PRIVACY] Audio buffer cleared from RAM
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:19:09] "POST /api/register HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:19:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:19:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] [DEBUG] Input embedding shape: (192,)
+[INFO] [DEBUG] Input embedding first 10 values: [-0.0213927   0.1111622   0.02014488  0.10586976  0.01350836 -0.1092635
+ -0.18880883  0.05267615 -0.05551908  0.03360403]
+[INFO] [DEBUG] Input embedding mean: 0.005699, std: 0.071943
+[INFO] [DEBUG] Input embedding norm: 1.000000
+[INFO] [DEBUG] helper_string (first 100 chars): 0x30303131313031313030313131303031303030313030313131303130303130303031303131303130313031303130313031
+[INFO] [DEBUG] commitment (first 100 chars): 0x6240b260c4a1cc524a9a97016f754163f3b259cbb7f09443f30f6ace79a6b6ef
+[INFO] [DEBUG] salt (first 100 chars): 0x3fd0470218ffadae9d543ec935aa832e53b929c0e51b0fa4b70ca77b796d6464
+[INFO] [DEBUG] Stored binary first 20: 00111011001110010001
+[INFO] [DEBUG] New binary first 20: 01111001011110000111
+[INFO] [DEBUG] Raw Hamming distance: 68/192 (35.4% different)
+[INFO] [DEBUG] Fuzzy verify() returned: 0.0
+[INFO] [DEBUG] compute_match_score() returned: 0.6458
+[INFO] [DEBUG] Final fuzzy_match value: 0.6458
+[INFO] [DEBUG] Liveness score: 0.0000
+[INFO] [DEBUG] Artifact score: 0.0855
+[WARNING] [IDENTITY] Fuzzy match 0.65 below 0.85 threshold - likely different person
+[INFO] [DEBUG] Combined score calculation: 0.6458*0.60 + 0.0000*0.25 + (1-0.0855)*0.15 = 0.5247
+[INFO] [PRIVACY] Audio buffer cleared from RAM
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:19:56] "POST /api/verify HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:20:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] [DEBUG] Input embedding shape: (192,)
+[INFO] [DEBUG] Input embedding first 10 values: [-0.05365472  0.04087109 -0.01398737  0.05017957 -0.01322745 -0.08078038
+  0.02044054  0.07822467 -0.06251664 -0.01803813]
+[INFO] [DEBUG] Input embedding mean: 0.008005, std: 0.071723
+[INFO] [DEBUG] Input embedding norm: 1.000000
+[INFO] [DEBUG] helper_string (first 100 chars): 0x30303131313031313030313131303031303030313030313131303130303130303031303131303130313031303130313031
+[INFO] [DEBUG] commitment (first 100 chars): 0x6240b260c4a1cc524a9a97016f754163f3b259cbb7f09443f30f6ace79a6b6ef
+[INFO] [DEBUG] salt (first 100 chars): 0x3fd0470218ffadae9d543ec935aa832e53b929c0e51b0fa4b70ca77b796d6464
+[INFO] [DEBUG] Stored binary first 20: 00111011001110010001
+[INFO] [DEBUG] New binary first 20: 01010011001111011001
+[INFO] [DEBUG] Raw Hamming distance: 61/192 (31.8% different)
+[INFO] [DEBUG] Fuzzy verify() returned: 0.0
+[INFO] [DEBUG] compute_match_score() returned: 0.6823
+[INFO] [DEBUG] Final fuzzy_match value: 0.6823
+[INFO] [DEBUG] Liveness score: 0.0000
+[INFO] [DEBUG] Artifact score: 0.0904
+[WARNING] [IDENTITY] Fuzzy match 0.68 below 0.85 threshold - likely different person
+[INFO] [DEBUG] Combined score calculation: 0.6823*0.60 + 0.0000*0.25 + (1-0.0904)*0.15 = 0.5458
+[INFO] [PRIVACY] Audio buffer cleared from RAM
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:20:18] "POST /api/verify HTTP/1.1" 200 -
+[INFO] [DEBUG] Input embedding shape: (192,)
+[INFO] [DEBUG] Input embedding first 10 values: [-0.09460775  0.10095989 -0.07058466  0.02757677  0.01711986 -0.0846516
+  0.01200987  0.06685526 -0.1248434   0.03349084]
+[INFO] [DEBUG] Input embedding mean: 0.001753, std: 0.072148
+[INFO] [DEBUG] Input embedding norm: 1.000000
+[INFO] [DEBUG] helper_string (first 100 chars): 0x30303131313031313030313131303031303030313030313131303130303130303031303131303130313031303130313031
+[INFO] [DEBUG] commitment (first 100 chars): 0x6240b260c4a1cc524a9a97016f754163f3b259cbb7f09443f30f6ace79a6b6ef
+[INFO] [DEBUG] salt (first 100 chars): 0x3fd0470218ffadae9d543ec935aa832e53b929c0e51b0fa4b70ca77b796d6464
+[INFO] [DEBUG] Stored binary first 20: 00111011001110010001
+[INFO] [DEBUG] New binary first 20: 01011011011111000011
+[INFO] [DEBUG] Raw Hamming distance: 63/192 (32.8% different)
+[INFO] [DEBUG] Fuzzy verify() returned: 0.0
+[INFO] [DEBUG] compute_match_score() returned: 0.6719
+[INFO] [DEBUG] Final fuzzy_match value: 0.6719
+[INFO] [DEBUG] Liveness score: 0.0000
+[INFO] [DEBUG] Artifact score: 0.0765
+[WARNING] [IDENTITY] Fuzzy match 0.67 below 0.85 threshold - likely different person
+[INFO] [DEBUG] Combined score calculation: 0.6719*0.60 + 0.0000*0.25 + (1-0.0765)*0.15 = 0.5416
+[INFO] [PRIVACY] Audio buffer cleared from RAM
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:20:33] "POST /api/verify HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:20:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:21:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:21:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:22:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:22:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:23:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:23:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:24:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:24:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:25:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:25:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:26:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:26:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:27:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:27:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:28:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:28:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:29:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:29:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:30:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:30:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:31:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:31:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:32:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:32:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:33:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:33:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:34:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:34:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:35:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:35:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:36:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:36:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:37:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:37:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:38:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:38:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:39:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:39:47] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:40:17] "GET /api/health HTTP/1.1" 200 -
+[INFO] 127.0.0.1 - - [04/Apr/2026 10:40:47] "GET /api/health HTTP/1.1" 200 -
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-vtgs8k__'}
+  warnings.warn(

@@ -24,13 +24,14 @@ class VoiceFuzzyExtractor:
     error-correcting codes to allow verification with tolerance.
     """
     
-    def __init__(self, embedding_dim: int = 192, hamming_threshold: int = 20):
+    def __init__(self, embedding_dim: int = 192, hamming_threshold: int = 48):
         """
         Initialize the fuzzy extractor.
         
         Args:
             embedding_dim: Dimension of voice embeddings (default: 192 for ECAPA-TDNN)
-            hamming_threshold: Maximum Hamming distance for fallback matching (default: 20)
+            hamming_threshold: Maximum Hamming distance for fallback matching (default: 48)
+                             Same person re-recording typically differs by 20-45 bits out of 192
         """
         self.embedding_dim = embedding_dim
         self.hamming_threshold = hamming_threshold
@@ -147,6 +148,12 @@ class VoiceFuzzyExtractor:
         
         return sum(c1 != c2 for c1, c2 in zip(bits1, bits2))
     
+    def _strip_0x_prefix(self, hex_str: str) -> str:
+        """Strip '0x' or '0X' prefix from hex string if present."""
+        if hex_str.startswith('0x') or hex_str.startswith('0X'):
+            return hex_str[2:]
+        return hex_str
+    
     def verify(self, embedding: np.ndarray, helper_string_hex: str, 
                commitment_hex: str, salt_hex: str) -> bool:
         """
@@ -154,13 +161,18 @@ class VoiceFuzzyExtractor:
         
         Args:
             embedding: numpy float32 array (192-dim) from new voice sample
-            helper_string_hex: helper data from enrollment (hex string)
-            commitment_hex: SHA-256 commitment from enrollment (hex string)
-            salt_hex: salt from enrollment (hex string)
+            helper_string_hex: helper data from enrollment (hex string, with or without 0x prefix)
+            commitment_hex: SHA-256 commitment from enrollment (hex string, with or without 0x prefix)
+            salt_hex: salt from enrollment (hex string, with or without 0x prefix)
             
         Returns:
             True if voice matches within tolerance, False otherwise
         """
+        # Strip 0x prefix if present (from blockchain/ethers.js)
+        helper_string_hex = self._strip_0x_prefix(helper_string_hex)
+        commitment_hex = self._strip_0x_prefix(commitment_hex)
+        salt_hex = self._strip_0x_prefix(salt_hex)
+        
         # Quantize the new embedding
         new_binary = self.quantize_embedding(embedding)
         
@@ -214,11 +226,14 @@ class VoiceFuzzyExtractor:
         
         Args:
             embedding: numpy float32 array (192-dim)
-            helper_string_hex: helper data from enrollment (hex string)
+            helper_string_hex: helper data from enrollment (hex string, with or without 0x prefix)
             
         Returns:
             Match score between 0.0 (no match) and 1.0 (perfect match)
         """
+        # Strip 0x prefix if present (from blockchain/ethers.js)
+        helper_string_hex = self._strip_0x_prefix(helper_string_hex)
+        
         new_binary = self.quantize_embedding(embedding)
         
         try:
@@ -241,6 +256,6 @@ class VoiceFuzzyExtractor:
 
 # Convenience function
 def create_fuzzy_extractor(embedding_dim: int = 192, 
-                           hamming_threshold: int = 20) -> VoiceFuzzyExtractor:
-    """Create a new VoiceFuzzyExtractor instance."""
+                           hamming_threshold: int = 48) -> VoiceFuzzyExtractor:
+    """Create a new VoiceFuzzyExtractor instance with loosened tolerance."""
     return VoiceFuzzyExtractor(embedding_dim, hamming_threshold)

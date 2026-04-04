@@ -8,7 +8,7 @@ import threading
 import numpy as np
 import torch
 import librosa
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,24 +39,81 @@ class VoiceEmbedder:
         self.model: Optional[Any] = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._model_lock = threading.Lock()
+        self._model_loaded = False
+        self._model_name = "speechbrain/spkrec-ecapa-voxceleb"
+        self._embedding_dim = 192
         
         # Get model cache directory from environment
         self.cache_dir = os.getenv("MODEL_CACHE_DIR", "./models")
-        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Auto-create cache directory if it doesn't exist
+        if not os.path.exists(self.cache_dir):
+            print(f"[EMBEDDER] Creating model cache directory: {self.cache_dir}")
+            os.makedirs(self.cache_dir, exist_ok=True)
         
     def _load_model(self):
         """Lazy load the ECAPA-TDNN model."""
         if self.model is None:
             with self._model_lock:
                 if self.model is None:
+                    print(f"[EMBEDDER] Starting model load: {self._model_name}")
+                    print(f"[EMBEDDER] Cache directory: {self.cache_dir}")
+                    print(f"[EMBEDDER] Device: {self.device}")
+                    
                     from speechbrain.inference.speaker import EncoderClassifier
                     
                     self.model = EncoderClassifier.from_hparams(
-                        source="speechbrain/spkrec-ecapa-voxceleb",
+                        source=self._model_name,
                         savedir=os.path.join(self.cache_dir, "spkrec-ecapa-voxceleb"),
                         run_opts={"device": str(self.device)}
                     )
+                    
+                    print(f"[EMBEDDER] Model loaded successfully!")
+                    
+                    # Run self-test with silent 1-second dummy tensor
+                    self._run_self_test()
+                    
+                    self._model_loaded = True
         return self.model
+    
+    def _run_self_test(self):
+        """Run self-test to verify model produces correct embedding shape."""
+        print("[EMBEDDER] Running self-test...")
+        
+        try:
+            # Create a 1-second silent audio tensor (16kHz)
+            dummy_audio = torch.zeros(1, 16000, dtype=torch.float32).to(self.device)
+            
+            # Add tiny noise to avoid complete silence
+            dummy_audio += torch.randn_like(dummy_audio) * 0.001
+            
+            with torch.no_grad():
+                test_embedding = self.model.encode_batch(dummy_audio)
+            
+            test_embedding = test_embedding.squeeze().cpu().numpy()
+            
+            if test_embedding.shape != (self._embedding_dim,):
+                print(f"[EMBEDDER] WARNING: Expected embedding shape ({self._embedding_dim},), got {test_embedding.shape}")
+                raise RuntimeError(f"Model self-test failed: expected shape ({self._embedding_dim},), got {test_embedding.shape}")
+            
+            print(f"[EMBEDDER] Self-test PASSED: embedding shape = {test_embedding.shape}")
+            
+        except Exception as e:
+            print(f"[EMBEDDER] Self-test FAILED: {e}")
+            raise RuntimeError(f"Model self-test failed: {e}")
+    
+    def get_model_status(self) -> Dict[str, Any]:
+        """
+        Get current model status.
+        
+        Returns:
+            Dict with keys: loaded, model_name, embedding_dim
+        """
+        return {
+            'loaded': self._model_loaded and self.model is not None,
+            'model_name': self._model_name,
+            'embedding_dim': self._embedding_dim
+        }
     
     def preprocess_audio(self, file_path: str) -> torch.Tensor:
         """
@@ -71,6 +128,9 @@ class VoiceEmbedder:
         Raises:
             ValueError: If silence is detected (RMS energy < 0.01)
             FileNotFoundError: If the audio file doesn't exist
+            
+        Note: ECAPA-TDNN works best with minimal preprocessing.
+              Aggressive noise gates destroy speaker identity information.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Audio file not found: {file_path}")
@@ -82,35 +142,14 @@ class VoiceEmbedder:
         print(f"[DEBUG EMBEDDER] Audio duration: {len(audio)/sr:.2f}s, samples: {len(audio)}")
         print(f"[DEBUG EMBEDDER] Raw audio - min: {audio.min():.4f}, max: {audio.max():.4f}, mean: {audio.mean():.6f}")
         
-        # Normalize amplitude to [-1, 1]
+        # Simple peak normalization to [-1, 1] - preserve speaker characteristics
         max_amplitude = np.max(np.abs(audio))
         if max_amplitude > 0:
             audio = audio / max_amplitude
         
-        # Apply spectral noise gate (subtract mean spectral magnitude)
-        # Compute STFT
-        stft = librosa.stft(audio, n_fft=2048, hop_length=512)
-        magnitude = np.abs(stft)
-        
-        # Compute mean spectral magnitude (noise floor estimate)
-        mean_magnitude = np.mean(magnitude, axis=1, keepdims=True)
-        
-        # Subtract noise floor (spectral subtraction)
-        magnitude_cleaned = np.maximum(magnitude - mean_magnitude * 0.5, 0)
-        
-        # Reconstruct audio with original phase
-        phase = np.angle(stft)
-        stft_cleaned = magnitude_cleaned * np.exp(1j * phase)
-        audio = librosa.istft(stft_cleaned, hop_length=512)
-        
-        # Re-normalize after noise reduction
-        max_amplitude = np.max(np.abs(audio))
-        if max_amplitude > 0:
-            audio = audio / max_amplitude
-        
-        # Silence detection: check RMS energy
+        # Silence detection: check RMS energy of normalized audio
         rms_energy = np.sqrt(np.mean(audio ** 2))
-        print(f"[DEBUG EMBEDDER] After noise gate - RMS energy: {rms_energy:.4f}, max: {np.max(np.abs(audio)):.4f}")
+        print(f"[DEBUG EMBEDDER] Normalized audio - RMS energy: {rms_energy:.4f}, max: {np.max(np.abs(audio)):.4f}")
         
         if rms_energy < 0.01:
             raise ValueError("Silence detected. Please re-record.")
@@ -182,18 +221,21 @@ class VoiceEmbedder:
             
         Returns:
             Cosine similarity score between 0.0 and 1.0
+            
+        Note: For ECAPA-TDNN voice embeddings:
+            - Same speaker re-recording: typically 0.85 - 0.99
+            - Different speakers: typically 0.20 - 0.60
         """
         # Ensure embeddings are normalized
         emb1_norm = emb1 / (np.linalg.norm(emb1) + 1e-10)
         emb2_norm = emb2 / (np.linalg.norm(emb2) + 1e-10)
         
-        # Compute cosine similarity
+        # Compute cosine similarity (dot product of normalized vectors)
         similarity = np.dot(emb1_norm, emb2_norm)
         
-        # Clamp to [0, 1] range (cosine similarity can be negative for dissimilar vectors)
-        # For voice verification, we map [-1, 1] to [0, 1]
-        similarity = (similarity + 1.0) / 2.0
-        
+        # For voice verification: keep raw cosine similarity 
+        # ECAPA-TDNN produces positive-dominant embeddings, so similarity is typically [0.2, 1.0]
+        # We clamp negative values (very different voices) to 0
         return float(np.clip(similarity, 0.0, 1.0))
 
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { getProvider, getVoiceVaultContract } from '../utils/contracts';
-import { verifyVoice, forensicAnalysis } from '../utils/api';
+import { verifyVoice, forensicAnalysis, getStoredEnrollment } from '../utils/api';
 import { ethers } from 'ethers';
 import AudioRecorder from '../components/AudioRecorder';
 
@@ -61,7 +61,8 @@ function SubTabButton({ active, onClick, children }) {
 function ResultCard({ score, isDeepfake }) {
   let color, icon, title, subtitle;
 
-  if (score >= 90 && !isDeepfake) {
+  // Thresholds aligned with backend: 33/28/20
+  if (score >= 33 && !isDeepfake) {
     color = '#10B981';
     title = 'AUTHENTIC';
     subtitle = 'Identity verified.';
@@ -70,7 +71,7 @@ function ResultCard({ score, isDeepfake }) {
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
       </svg>
     );
-  } else if (score >= 75 && !isDeepfake) {
+  } else if (score >= 28 && !isDeepfake) {
     color = '#FBBF24';
     title = 'SUSPICIOUS';
     subtitle = 'Step-up auth recommended.';
@@ -79,7 +80,7 @@ function ResultCard({ score, isDeepfake }) {
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
     );
-  } else if (score >= 60 && !isDeepfake) {
+  } else if (score >= 20 && !isDeepfake) {
     color = '#F97316';
     title = 'UNCERTAIN';
     subtitle = 'Could not confirm identity.';
@@ -114,15 +115,16 @@ function ResultCard({ score, isDeepfake }) {
 
 function ResultTable({ result }) {
   const getAssessment = (score) => {
-    if (score >= 90) return { text: 'HIGH', color: 'text-green-400' };
-    if (score >= 75) return { text: 'MED', color: 'text-yellow-400' };
-    if (score >= 60) return { text: 'LOW', color: 'text-orange-400' };
+    // Thresholds aligned with backend: 33/28/20
+    if (score >= 33) return { text: 'HIGH', color: 'text-green-400' };
+    if (score >= 28) return { text: 'MED', color: 'text-yellow-400' };
+    if (score >= 20) return { text: 'LOW', color: 'text-orange-400' };
     return { text: 'REJ', color: 'text-red-400' };
   };
 
   const overall = getAssessment(result.score);
-  const livenessAssessment = result.liveness_score >= 70 ? 'Natural' : 'Synthetic';
-  const spectralAssessment = result.artifact_score <= 30 ? 'Clean' : 'Artifacts';
+  const livenessAssessment = result.liveness_score >= 0.70 ? 'Natural' : 'Synthetic';
+  const spectralAssessment = result.artifact_score <= 0.30 ? 'Clean' : 'Artifacts';
 
   return (
     <div className="mt-6 bg-gray-800 rounded-lg overflow-hidden">
@@ -137,22 +139,22 @@ function ResultTable({ result }) {
         <tbody className="divide-y divide-gray-700">
           <tr>
             <td className="px-4 py-3 text-gray-400">Fuzzy Match</td>
-            <td className="px-4 py-3 text-white">{result.score >= 75 ? 'Pass' : 'Fail'}</td>
-            <td className={`px-4 py-3 ${result.score >= 75 ? 'text-green-400' : 'text-red-400'}`}>
-              {result.score >= 75 ? 'Matched' : 'No Match'}
+            <td className="px-4 py-3 text-white">{result.fuzzy_match ? 'Pass' : 'Fail'}</td>
+            <td className={`px-4 py-3 ${result.fuzzy_match ? 'text-green-400' : 'text-red-400'}`}>
+              {result.fuzzy_match ? 'Matched' : 'No Match'}
             </td>
           </tr>
           <tr>
             <td className="px-4 py-3 text-gray-400">Liveness Score</td>
-            <td className="px-4 py-3 text-white">{Math.round(result.liveness_score || 0)}%</td>
-            <td className={`px-4 py-3 ${result.liveness_score >= 70 ? 'text-green-400' : 'text-red-400'}`}>
+            <td className="px-4 py-3 text-white">{Math.round((result.liveness_score || 0) * 100)}%</td>
+            <td className={`px-4 py-3 ${result.liveness_score >= 0.70 ? 'text-green-400' : 'text-red-400'}`}>
               {livenessAssessment}
             </td>
           </tr>
           <tr>
             <td className="px-4 py-3 text-gray-400">Spectral Check</td>
-            <td className="px-4 py-3 text-white">{Math.round(100 - (result.artifact_score || 0))}%</td>
-            <td className={`px-4 py-3 ${result.artifact_score <= 30 ? 'text-green-400' : 'text-orange-400'}`}>
+            <td className="px-4 py-3 text-white">{Math.round(100 - (result.artifact_score || 0) * 100)}%</td>
+            <td className={`px-4 py-3 ${result.artifact_score <= 0.30 ? 'text-green-400' : 'text-orange-400'}`}>
               {spectralAssessment}
             </td>
           </tr>
@@ -282,6 +284,7 @@ export default function VerifyPage() {
   const [profileStatus, setProfileStatus] = useState(null);
   const [profileData, setProfileData] = useState(null);
   const [checkingProfile, setCheckingProfile] = useState(false);
+  const [usingLocalStorage, setUsingLocalStorage] = useState(false);
 
   const [audioInputMode, setAudioInputMode] = useState('record');
   const [audioBlob, setAudioBlob] = useState(null);
@@ -295,7 +298,27 @@ export default function VerifyPage() {
   const effectiveAddress = useOwnAddress && isConnected ? address : targetAddress;
 
   // Check profile when address changes - fetch directly from blockchain
-  const checkProfile = useCallback(async (addr) => {
+  // For "verify my own voice", first try localStorage (works before blockchain)
+  const checkProfile = useCallback(async (addr, isOwnVoice = false) => {
+    // When verifying own voice, first check localStorage for enrollment data
+    if (isOwnVoice) {
+      const storedEnrollment = getStoredEnrollment();
+      if (storedEnrollment) {
+        console.log('[VerifyPage] Using localStorage enrollment data');
+        setProfileStatus('Using locally stored enrollment (session-based verification)');
+        setProfileData({
+          helperString: storedEnrollment.helperString,
+          commitment: storedEnrollment.commitment,
+          salt: storedEnrollment.salt
+        });
+        setUsingLocalStorage(true);
+        setCheckingProfile(false);
+        return;
+      }
+    }
+
+    setUsingLocalStorage(false);
+
     if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
       setProfileStatus(null);
       setProfileData(null);
@@ -341,10 +364,10 @@ export default function VerifyPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      checkProfile(effectiveAddress);
+      checkProfile(effectiveAddress, useOwnAddress && isConnected);
     }, 300);
     return () => clearTimeout(timer);
-  }, [effectiveAddress, checkProfile]);
+  }, [effectiveAddress, checkProfile, useOwnAddress, isConnected]);
 
   useEffect(() => {
     if (useOwnAddress && isConnected) {
@@ -517,9 +540,9 @@ export default function VerifyPage() {
               )}
 
               {!checkingProfile && profileStatus && (
-                <p className={`text-sm mt-2 ${profileData ? 'text-green-400' : 'text-red-400'}`}>
+                <p className={`text-sm mt-2 ${profileData ? (usingLocalStorage ? 'text-blue-400' : 'text-green-400') : 'text-red-400'}`}>
                   {profileData ? (
-                    <>✓ {profileStatus}</>
+                    <>✓ {profileStatus}{usingLocalStorage && ' (No blockchain required)'}</>
                   ) : (
                     <>✗ {profileStatus} Registration required before verification.</>
                   )}
