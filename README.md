@@ -218,7 +218,7 @@ If you have already deployed contracts and configured environment files, you can
 3. Provide evidence description (max 200 chars)
 4. Submit on-chain report
 
-## 📐 Architecture
+## Architecture
 
 ```
 ┌─────────────────┐
