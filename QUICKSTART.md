@@ -1,6 +1,6 @@
 # Voice Vault - Quick Reference Card
 
-## 🚀 Quick Start Commands
+## Quick Start Commands
 
 ### Option 1: Automated Start
 ```bash
@@ -23,7 +23,7 @@ Then open: **http://localhost:5173**
 
 ---
 
-## 🌐 API Endpoints
+## API Endpoints
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -35,7 +35,7 @@ Then open: **http://localhost:5173**
 
 ---
 
-## 📝 Environment Variables
+## Environment Variables
 
 ### Backend (.env in /backend/)
 ```bash
@@ -57,7 +57,7 @@ VITE_FRAUD_REGISTRY_ADDRESS=0x...
 
 ---
 
-## 🔗 Smart Contract Addresses (Sepolia)
+## Smart Contract Addresses (Sepolia)
 
 After deployment, update these in both .env files:
 
@@ -69,7 +69,7 @@ Find in: `blockchain/deployedAddresses.json`
 
 ---
 
-## 🧪 Testing Workflows
+## Testing Workflows
 
 ### 1. Register Voice
 1. Navigate to Register page
@@ -95,7 +95,7 @@ Find in: `blockchain/deployedAddresses.json`
 
 ---
 
-## 🐛 Common Issues & Fixes
+## Common Issues & Fixes
 
 ### Backend won't start
 ```bash
@@ -139,7 +139,7 @@ Then restart Flask.
 
 ---
 
-## 📊 Port Configuration
+## Port Configuration
 
 | Service | Port | URL |
 |---------|------|-----|
@@ -151,20 +151,20 @@ Then restart Flask.
 
 ---
 
-## 🔐 Security Features
+## Security Features
 
-✅ Audio stored in RAM only (SpooledTemporaryFile)  
-✅ 10MB file size limit  
-✅ 1-60 second duration validation  
-✅ Strict MIME type whitelist  
-✅ 30-second AI processing timeout  
-✅ Ethereum address validation  
-✅ No stack traces in API responses  
-✅ Memory cleanup with gc.collect()  
+- Audio stored in RAM only (SpooledTemporaryFile)  
+- 10MB file size limit  
+- 1-60 second duration validation  
+- Strict MIME type whitelist  
+- 30-second AI processing timeout  
+- Ethereum address validation  
+- No stack traces in API responses  
+- Memory cleanup with gc.collect()  
 
 ---
 
-## 📚 Documentation Files
+## Documentation Files
 
 - **README.md**: Full setup guide
 - **SUMMARY.md**: Project overview
@@ -173,7 +173,7 @@ Then restart Flask.
 
 ---
 
-## 🔧 Build Commands
+## Build Commands
 
 ### Compile Contracts
 ```bash
@@ -201,7 +201,7 @@ pytest
 
 ---
 
-## 💡 Key Concepts
+## Key Concepts
 
 ### Fuzzy Extractor
 Generates cryptographic key from biometric data with error tolerance.
@@ -217,20 +217,20 @@ Public data allowing key regeneration during verification.
 
 ---
 
-## 🎯 Success Metrics
+## Success Metrics
 
 Voice Vault is working correctly when:
 
-✅ Backend health check returns `{"status": "ok"}`  
-✅ MetaMask connects and switches to Sepolia  
-✅ Voice registration completes with TX hash  
-✅ Etherscan shows transaction confirmed  
-✅ Verification returns score (0-100)  
-✅ Fraud reports appear in registry  
+- Backend health check returns `{"status": "ok"}`  
+- MetaMask connects and switches to Sepolia  
+- Voice registration completes with TX hash  
+- Etherscan shows transaction confirmed  
+- Verification returns score (0-100)  
+- Fraud reports appear in registry  
 
 ---
 
-## 🆘 Support
+## Support
 
 **Issues Found?**
 
@@ -248,4 +248,4 @@ Check the full README.md for detailed troubleshooting.
 
 **Last Updated**: 2026-04-03  
 **Version**: 1.0.0  
-**Status**: Production-ready for demo ✅
+**Status**: Production-ready for demo
