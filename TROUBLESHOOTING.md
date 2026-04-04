@@ -21,7 +21,7 @@ export MOCK_MODE=false
 python3 app.py
 ```
 
-Wait for `✅ AI models loaded successfully!` before running the validator.
+Wait for ` AI models loaded successfully!` before running the validator.
 
 ---
 
@@ -37,7 +37,7 @@ Wait for `✅ AI models loaded successfully!` before running the validator.
 **Solution:** We fixed this by adding eager model loading at startup. If it recurs:
 
 1. Check Flask terminal for errors
-2. Ensure `✅ AI models loaded successfully!` appears before making requests
+2. Ensure ` AI models loaded successfully!` appears before making requests
 3. If model loading fails, check disk space and memory
 
 ---

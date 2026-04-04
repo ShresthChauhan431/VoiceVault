@@ -15,10 +15,10 @@ Voice Vault is a blockchain-powered voice biometric authentication system that c
 
 | Metric | Value | Industry Benchmark | Status |
 |--------|-------|-------------------|--------|
-| True Acceptance Rate (TAR) | **100%** | ≥95% | ✅ Exceeds |
-| False Acceptance Rate (FAR) | **0%** | ≤1% | ✅ Exceeds |
-| Deepfake Detection Rate (DDR) | **100%** | ≥90% | ✅ Exceeds |
-| Equal Error Rate (EER) | **<5%** | ≤5% | ✅ Meets |
+| True Acceptance Rate (TAR) | **100%** | ≥95% |  Exceeds |
+| False Acceptance Rate (FAR) | **0%** | ≤1% |  Exceeds |
+| Deepfake Detection Rate (DDR) | **100%** | ≥90% |  Exceeds |
+| Equal Error Rate (EER) | **<5%** | ≤5% |  Meets |
 
 **Overall System Accuracy: 100%** (at 50% threshold)
 
@@ -264,7 +264,7 @@ The **Equal Error Rate** is the threshold where FAR = FRR. Lower EER indicates b
 | Liveness Score | 0.0000 | Pre-recorded audio (expected) |
 | Artifact Score | 0.0972 | Low artifacts (natural audio) |
 | Identity Mismatch | True | Below strict threshold |
-| Decision | **ACCEPTED** | ✅ Correct |
+| Decision | **ACCEPTED** |  Correct |
 
 **Analysis:** The genuine sample scored above threshold despite lower liveness (expected for pre-recorded files). The fuzzy match of 64% indicates good voice consistency between enrollment and verification.
 
@@ -277,7 +277,7 @@ The **Equal Error Rate** is the threshold where FAR = FRR. Lower EER indicates b
 | Liveness Score | 0.0399 | Minimal liveness signal |
 | Artifact Score | 0.2656 | Some anomalies detected |
 | Identity Mismatch | True | Different voice detected |
-| Decision | **REJECTED** | ✅ Correct |
+| Decision | **REJECTED** |  Correct |
 
 **Analysis:** The imposter scored below threshold with noticeably lower fuzzy match, confirming the system can distinguish different speakers. The 6% score gap from genuine provides good separation.
 
@@ -290,7 +290,7 @@ The **Equal Error Rate** is the threshold where FAR = FRR. Lower EER indicates b
 | Liveness Score | 0.0000 | No liveness detected |
 | Artifact Score | 0.4479 | **High artifacts detected** |
 | Identity Mismatch | True | Flagged as suspicious |
-| Decision | **REJECTED** | ✅ Correct |
+| Decision | **REJECTED** |  Correct |
 
 **Analysis:** Despite high fuzzy match (the AI clone successfully mimicked voice characteristics), the artifact detector identified spectral anomalies typical of synthetic audio. This demonstrates the multi-layer defense working correctly.
 
@@ -298,9 +298,9 @@ The **Equal Error Rate** is the threshold where FAR = FRR. Lower EER indicates b
 
 | File | Category | Score | Fuzzy | Liveness | Artifacts | Result |
 |------|----------|-------|-------|----------|-----------|--------|
-| userA_real_2.wav | Genuine | 51% | 0.64 | 0.00 | 0.10 | ✅ ACCEPTED |
-| userB_imposter.wav | Imposter | 45% | 0.56 | 0.04 | 0.27 | ✅ REJECTED |
-| deepfake_A_clone.wav | Deepfake | 47% | 0.66 | 0.00 | 0.45 | ✅ REJECTED |
+| userA_real_2.wav | Genuine | 51% | 0.64 | 0.00 | 0.10 |  ACCEPTED |
+| userB_imposter.wav | Imposter | 45% | 0.56 | 0.04 | 0.27 |  REJECTED |
+| deepfake_A_clone.wav | Deepfake | 47% | 0.66 | 0.00 | 0.45 |  REJECTED |
 
 ---
 
@@ -447,10 +447,10 @@ Voice Vault employs a **multi-signal deepfake detection** approach:
 
 | Requirement | Voice Vault | Compliance |
 |-------------|-------------|------------|
-| Biometric data protection | Fuzzy commitment | ✅ |
-| Template non-reversibility | Hash-based | ✅ |
-| Presentation attack detection | Liveness + artifacts | ✅ |
-| Error rate reporting | TAR/FAR/EER | ✅ |
+| Biometric data protection | Fuzzy commitment |  |
+| Template non-reversibility | Hash-based |  |
+| Presentation attack detection | Liveness + artifacts |  |
+| Error rate reporting | TAR/FAR/EER |  |
 
 ### 9.3 Comparison with Commercial Systems
 
@@ -597,7 +597,7 @@ This accuracy validation was performed using:
 - Actual audio processing pipeline
 - Production-equivalent configuration
 
-**Validation Status:** ✅ PASSED
+**Validation Status:**  PASSED
 
 **Certified Metrics:**
 - TAR: 100% at 50% threshold

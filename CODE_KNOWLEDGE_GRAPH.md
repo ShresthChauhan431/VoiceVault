@@ -1,10 +1,5 @@
 # VoiceVault Complete Code Knowledge Graph
 
-**Project:** VoiceVault - Blockchain-Powered Voice Biometric Authentication  
-**Generated:** April 4, 2026  
-**Scope:** Full End-to-End Audit (All Source Files)  
-**Total Files Analyzed:** 35+ source files
-
 ---
 
 ## Table of Contents
