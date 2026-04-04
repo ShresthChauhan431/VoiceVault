@@ -6,3 +6,5 @@ frontend/.env
 __pycache__/
 *.pyc
 logs/
+# Neo4j MCP configuration
+mcp/.env.neo4j

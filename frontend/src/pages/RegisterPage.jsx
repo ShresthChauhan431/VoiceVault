@@ -5,7 +5,21 @@ import { useVoiceRegistration } from '../hooks/useVoiceRegistration';
 import { getProvider, getVoiceVaultContract } from '../utils/contracts';
 import AudioRecorder from '../components/AudioRecorder';
 
-const PASSPHRASE = 'My voice is my password and my identity.';
+const PASSPHRASES = [
+  'My voice is my password and my identity.',
+  'I am verifying my voice for VoiceVault.',
+  'This voice belongs to me for authentication.',
+  'VoiceVault verify my identity now.',
+  'My voice is unique and verifies me.',
+  'I consent to voice biometric verification.',
+  'Verifying my voice with VoiceVault protocol.',
+  'My voice confirms my blockchain identity.',
+];
+
+function getDynamicPassphrase() {
+  const index = Math.floor(Math.random() * PASSPHRASES.length);
+  return PASSPHRASES[index];
+}
 
 function StepIndicator({ currentStep, totalSteps = 5 }) {
   return (
@@ -58,6 +72,14 @@ export default function RegisterPage() {
   const [audioBlob, setAudioBlob] = useState(null);
   const [processingMessage, setProcessingMessage] = useState('');
   const [error, setError] = useState(null);
+  const [passphrase, setPassphrase] = useState(() => getDynamicPassphrase());
+
+  // Regenerate passphrase on step change to step 3
+  useEffect(() => {
+    if (step === 3) {
+      setPassphrase(getDynamicPassphrase());
+    }
+  }, [step]);
 
   // Check if user already has a voice profile
   const checkExistingProfile = useCallback(async () => {
@@ -244,7 +266,7 @@ export default function RegisterPage() {
               
               <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 mb-6">
                 <p className="text-sm text-gray-400 mb-2">Please read this phrase aloud clearly:</p>
-                <p className="text-lg text-white font-medium italic">&ldquo;{PASSPHRASE}&rdquo;</p>
+                <p className="text-lg text-white font-medium italic">&ldquo;{passphrase}&rdquo;</p>
               </div>
 
               <AudioRecorder

@@ -49,9 +49,21 @@ app = Flask(__name__)
 # Request size limit (10MB)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
-# Configure CORS for frontend
+# Configuration - Load these first before using in CORS
+MOCK_MODE = os.getenv('MOCK_MODE', 'false').lower() == 'true'
+FLASK_PORT = int(os.getenv('FLASK_PORT', '5001'))
+MAX_AUDIO_SIZE = 10 * 1024 * 1024  # 10MB
+MIN_DURATION = 1.0  # seconds
+MAX_DURATION = 60.0  # seconds
+AI_TIMEOUT_SECONDS = 30  # Max time for AI processing
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+
+# CORS origins - configurable via environment (comma-separated)
+CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',')
+
+# Configure CORS for frontend (configurable via CORS_ORIGINS env var)
 CORS(app,
-     origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+     origins=CORS_ORIGINS,
      methods=["GET", "POST", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"],
      supports_credentials=False
@@ -71,6 +83,10 @@ MAX_AUDIO_SIZE = 10 * 1024 * 1024  # 10MB
 MIN_DURATION = 1.0  # seconds
 MAX_DURATION = 60.0  # seconds
 AI_TIMEOUT_SECONDS = 30  # Max time for AI processing
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+
+# CORS origins - configurable via environment (comma-separated)
+CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',')
 
 # Allowed audio MIME types (strict whitelist)
 ALLOWED_AUDIO_TYPES = {
@@ -773,23 +789,20 @@ def verify_voice():
                 'rejection_reason': 'Speaker mismatch: cosine similarity too low'
             })
         
-        # Clone detection gate
-        # AI clones have high cosine but low liveness + artifacts
-        if (cosine_score > 0.45 and
-            liveness_score < 0.25 and
-            artifact_score > 0.28):
+        # Clone detection gate (updated for new liveness method)
+        # AI clones have high cosine + high artifact (> 0.30)
+        # Real voices have low artifact (< 0.20)
+        if cosine_score > 0.40 and artifact_score > 0.30:
+            logger.warning(f'[VERIFY] CLONE GATE: Cosine {cosine_score:.4f} > 0.40 AND artifact {artifact_score:.4f} > 0.30 → DEEPFAKE')
             return jsonify({
                 'status': 'deepfake_detected',
-                'confidence': 0,
                 'score': 0,
-                'rejection_reason': 'High similarity with low liveness — suspected AI voice clone',
-                'details': {
-                    'cosine_similarity': round(cosine_score, 3),
-                    'liveness_score': round(liveness_score, 3),
-                    'artifact_score': round(artifact_score, 3),
-                    'fuzzy_match': fuzzy_passed
-                }
-            }), 200
+                'confidence_level': 'REJECTED',
+                'is_deepfake': True,
+                **gate_metrics,
+                'recommendation': 'Voice appears to be an AI voice clone.',
+                'rejection_reason': 'Clone gate: high similarity with synthetic artifacts detected'
+            })
         
         # STEP 6: Compute final score using new formula
         base_score = cosine_score * 100
@@ -839,9 +852,13 @@ def verify_voice():
 def debug_similarity():
     """
     Debug endpoint to compute raw similarity between two audio files.
-    Input: multipart/form-data with 'audio1' and 'audio2' fields
+    DISABLED IN PRODUCTION - Input: multipart/form-data with 'audio1' and 'audio2' fields
     Returns: Raw cosine similarity and embedding statistics
     """
+    # Disable debug endpoint in production
+    if not FLASK_DEBUG:
+        return jsonify({'error': 'disabled', 'message': 'Debug endpoint disabled in production'}), 403
+    
     temp_path1 = None
     temp_path2 = None
     audio_bytes1 = None
@@ -1374,4 +1391,4 @@ curl -X POST http://localhost:{FLASK_PORT}/api/challenge \\
             print(f"⚠️  Warning: Could not pre-load models: {e}")
             print("   Models will load lazily on first request (may timeout)")
     
-    app.run(host='0.0.0.0', port=FLASK_PORT, debug=True, use_reloader=False)
+    app.run(host='0.0.0.0', port=FLASK_PORT, debug=FLASK_DEBUG, use_reloader=False)

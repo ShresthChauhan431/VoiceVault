@@ -130,6 +130,12 @@ export default function FraudRegistryPage() {
     e.preventDefault();
     if (!suspectAddress || !evidence) return;
 
+    // Validate Ethereum address format
+    if (!/^0x[a-fA-F0-9]{40}$/.test(suspectAddress)) {
+      setSubmitError('Invalid Ethereum address format');
+      return;
+    }
+
     setSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
