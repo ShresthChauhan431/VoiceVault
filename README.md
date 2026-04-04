@@ -1,8 +1,8 @@
-# Voice Vault — Decentralized Voice Identity & Deepfake Detection
+# VoiceVault - Decentralized Voice Identity & Deepfake Detection
 
-**VoiceVault** is a blockchain-powered voice biometric authentication system that combines AI-driven voice analysis with on-chain identity anchoring. Register your unique voice signature as a soulbound token (SBT) and verify audio authenticity against deepfakes.
+VoiceVault is a blockchain-powered voice biometric authentication system that combines AI-driven voice analysis with on-chain identity anchoring. Register your unique voice signature as a soulbound token (SBT) and verify audio authenticity against deepfakes.
 
-## 🎯 Key Features
+## Key Features
 
 - **Voice Registration**: Generate cryptographic fingerprints from voice recordings
 - **Deepfake Detection**: AI-powered liveness and spectral artifact analysis
@@ -11,7 +11,7 @@
 - **Fraud Registry**: Community-driven flagging system for suspicious addresses
 - **Forensic Analysis**: Detailed audio reports for investigative purposes
 
-## 🛠 Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
@@ -21,19 +21,21 @@
 | **Network** | Ethereum Sepolia Testnet |
 | **AI Models** | SpeechBrain ECAPA-TDNN, Fuzzy Extractor |
 
-## 📋 Prerequisites
+## Prerequisites
 
-- **Node.js** 18+ (for frontend + Hardhat)
-- **Python** 3.9+ (for backend)
+Before running the project, ensure you have the following installed:
+
+- **Node.js** 18 or higher (for frontend and Hardhat)
+- **Python** 3.9 or higher (for backend AI processing)
 - **MetaMask** browser extension
-- **Sepolia ETH** (get from [faucet](https://sepoliafaucet.com/))
-- **Alchemy/Infura RPC** endpoint (for deployment)
+- **Sepolia ETH** for gas fees (get from [Sepolia faucet](https://sepoliafaucet.com/))
+- **Alchemy or Infura RPC endpoint** (free tier available at [Alchemy](https://www.alchemy.com/))
 
-## 🚀 Setup Instructions
+## How to Run the Project
 
-Follow these steps **in order**:
+Follow these steps in order to set up and run VoiceVault locally:
 
-### 1. Clone and Configure Environment
+### Step 1: Clone the Repository and Configure Environment
 
 ```bash
 git clone <repository-url>
@@ -63,7 +65,7 @@ VITE_SBT_ADDRESS=deployed_sbt_address
 VITE_FRAUD_REGISTRY_ADDRESS=deployed_fraud_address
 ```
 
-### 2. Install Backend Dependencies
+### Step 2: Install Backend Dependencies
 
 ```bash
 cd backend
@@ -76,7 +78,7 @@ cd ..
 
 **Note**: If SpeechBrain models fail to download or cause OOM errors, keep `MOCK_MODE=true` in backend/.env.
 
-### 3. Install Frontend Dependencies
+### Step 3: Install Frontend Dependencies
 
 ```bash
 cd frontend
@@ -84,7 +86,7 @@ npm install
 cd ..
 ```
 
-### 4. Install Blockchain Dependencies
+### Step 4: Install Blockchain Dependencies
 
 ```bash
 cd blockchain
@@ -92,7 +94,7 @@ npm install
 cd ..
 ```
 
-### 5. Compile Smart Contracts
+### Step 5: Compile Smart Contracts
 
 ```bash
 cd blockchain
@@ -101,7 +103,7 @@ npx hardhat compile
 
 Expected output: "Compiled X Solidity files successfully"
 
-### 6. Deploy Contracts to Sepolia
+### Step 6: Deploy Contracts to Sepolia
 
 **First**, ensure you have:
 - Sepolia ETH in your deployer wallet
@@ -122,7 +124,7 @@ This will:
 
 **Save the addresses!** You'll need them in the next step.
 
-### 7. Update Environment Files
+### Step 7: Update Environment Files with Deployed Addresses
 
 Copy the deployed addresses from terminal output or `blockchain/deployedAddresses.json`:
 
@@ -138,7 +140,7 @@ Update **both** `.env` files:
 - `/backend/.env`: Set `CONTRACT_ADDRESS`, `VITE_CONTRACT_ADDRESS`, `VITE_SBT_ADDRESS`, `VITE_FRAUD_REGISTRY_ADDRESS`
 - `/frontend/.env`: Set `VITE_CONTRACT_ADDRESS`, `VITE_SBT_ADDRESS`, `VITE_FRAUD_REGISTRY_ADDRESS`
 
-### 8. Copy Contract ABIs to Frontend
+### Step 8: Copy Contract ABIs to Frontend
 
 ```bash
 # Copy compiled contract ABIs
@@ -148,7 +150,7 @@ cp blockchain/artifacts/contracts/FraudRegistry.sol/FraudRegistry.json frontend/
 cp blockchain/artifacts/contracts/VoiceIDSBT.sol/VoiceIDSBT.json frontend/src/abi/
 ```
 
-### 9. Start Backend Server
+### Step 9: Start Backend Server
 
 ```bash
 cd backend
@@ -164,20 +166,34 @@ curl http://localhost:5001/api/health
 # Expected: {"status":"ok","model_loaded":true,"mock_mode":true,"version":"2.0"}
 ```
 
-### 10. Start Frontend Development Server
+### Step 10: Start Frontend Development Server
 
-**In a new terminal**:
+Open a new terminal window (keep the backend running) and execute:
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`
+The frontend will start on `http://localhost:5173`
 
-Open your browser and navigate to the app!
+Open your browser and navigate to `http://localhost:5173` to use the application.
 
-## 🎮 Usage
+---
+
+## Quick Start (Alternative Method)
+
+If you have already deployed contracts and configured environment files, you can use the provided scripts:
+
+```bash
+# Start both backend and frontend
+./start.sh
+
+# Stop all services
+./stop.sh
+```
+
+## Usage
 
 ### Register Your Voice
 
@@ -234,7 +250,7 @@ Open your browser and navigate to the app!
 5. Smart contract stores commitment + mints SBT
 6. Voice now anchored on-chain and queryable
 
-## 🔒 Security Features
+## Security Features
 
 - **No audio stored**: Temp files deleted immediately after processing
 - **Strict MIME validation**: Only audio/* files accepted (10MB limit)
@@ -244,7 +260,7 @@ Open your browser and navigate to the app!
 - **No stack traces**: All errors sanitized in API responses
 - **Soulbound tokens**: Non-transferable (can't be sold/stolen)
 
-## 📝 Smart Contract Details
+## Smart Contract Details
 
 ### VoiceVault.sol
 
@@ -281,7 +297,7 @@ Public fraud reporting system:
 - Queryable by suspect address
 - Immutable on-chain audit trail
 
-## 🧪 Testing
+## Testing
 
 ### Health Check
 ```bash
@@ -303,7 +319,7 @@ npx hardhat console --network sepolia
 > await vault.getRegisteredCount()
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
@@ -314,7 +330,7 @@ npx hardhat console --network sepolia
 | CORS errors | Ensure backend on 5001, frontend on 5173 |
 | "UNCONFIGURED_NAME" | Contract addresses missing in frontend/.env |
 
-## 📚 API Endpoints
+## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -324,23 +340,51 @@ npx hardhat console --network sepolia
 | `/api/forensic` | POST | Detailed forensic analysis |
 | `/api/get_profile` | GET | Fetch profile from blockchain |
 
-## 📄 License
+## Project Structure
 
-This project is built for educational/hackathon purposes. Refer to individual dependencies for their licenses.
+```
+VoiceVault/
+├── frontend/          # React + Vite frontend application
+├── backend/           # Python Flask API server
+├── blockchain/        # Solidity smart contracts + Hardhat
+├── start.sh          # Start all services
+├── stop.sh           # Stop all services
+└── README.md         # This file
+```
 
-## 🙏 Acknowledgments
+## Dependencies
 
-- **SpeechBrain** for ECAPA-TDNN voice embeddings
-- **OpenZeppelin** for secure smart contract templates
-- **Hardhat** for Ethereum development environment
-- **Sepolia** testnet for free testing
+### Frontend
+- React 18+
+- Vite 5+
+- ethers.js v6
+- Tailwind CSS
 
-## 🔗 Demo
+### Backend
+- Flask 3.0+
+- SpeechBrain (ECAPA-TDNN model)
+- librosa (audio processing)
+- web3.py (blockchain interaction)
+- PyTorch 2.x
 
-**Etherscan**: View deployed contracts on [Sepolia Etherscan](https://sepolia.etherscan.io/)
+### Blockchain
+- Hardhat 2.22+
+- Solidity 0.8.20
+- OpenZeppelin Contracts 4.9.6
 
-**Architecture**: Fuzzy Extractor + Off-Chain AI + On-Chain Anchoring
+## License
 
----
+This project is built for educational and hackathon purposes. Refer to individual dependencies for their licenses.
 
-**Built for decentralized identity. Powered by cryptography and machine learning.**
+## Acknowledgments
+
+- SpeechBrain for ECAPA-TDNN voice embeddings
+- OpenZeppelin for secure smart contract templates
+- Hardhat for Ethereum development environment
+- Sepolia testnet for free testing
+
+## Demo
+
+View deployed contracts on [Sepolia Etherscan](https://sepolia.etherscan.io/)
+
+Built for decentralized identity. Powered by cryptography and machine learning.
